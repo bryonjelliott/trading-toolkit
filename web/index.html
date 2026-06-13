@@ -1,0 +1,64 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Trading Toolkit</title>
+<link rel="stylesheet" href="/assets/style.css">
+</head>
+<body>
+<div class="topbar">
+  <div class="brand"><span>Trading Toolkit</span><small>Day-trading research dashboard</small></div>
+  <div class="nav">
+    <a href="/" class="active">Home</a>
+    <a href="/scanner.html">Scanner</a>
+    <a href="/journal.html">Journal</a>
+  </div>
+</div>
+
+<div class="wrap">
+  <div class="hero">
+    <h1>Your trading tools, one place</h1>
+    <p>Scan the market for confluence setups and log every trade — synced across all your devices. Pick a tool to begin.</p>
+  </div>
+
+  <div class="tiles">
+
+    <a class="tile live" href="/scanner.html">
+      <span class="badge live">Live</span>
+      <div class="icon">📊</div>
+      <h3>Confluence Scanner</h3>
+      <p>Scans a ~70-ticker Nasdaq watchlist for stocks meeting 3+ of 5 confluence signals — EMA trend, RSI, volume, market alignment — and ranks the candidates. Auto-refreshed every 15 minutes.</p>
+      <div class="go">Open scanner →</div>
+    </a>
+
+    <a class="tile live" href="/journal.html">
+      <span class="badge live">Live</span>
+      <div class="icon">📓</div>
+      <h3>Trading Journal</h3>
+      <p>Log every trade and track performance over time — P&amp;L, win rate, profit factor, expectancy and an equity curve. Stored in Supabase and synced to every device.</p>
+      <div class="go">Open journal →</div>
+    </a>
+
+    <div class="tile soon">
+      <span class="badge soon">Stage 2</span>
+      <div class="icon">🎯</div>
+      <h3>Trade Setup Cards</h3>
+      <p>Support/resistance detection plus entry, stop, two targets and 1%-risk position sizing — turns qualifying tickers into full trade plans.</p>
+      <div class="go muted">Coming next</div>
+    </div>
+
+    <div class="tile soon">
+      <span class="badge soon">Stage 3</span>
+      <div class="icon">📰</div>
+      <h3>Premarket Context</h3>
+      <p>Gap %, premarket volume, relative volume (RVOL), ATR and float flags layered onto each candidate for opening-bell context.</p>
+      <div class="go muted">Coming soon</div>
+    </div>
+
+  </div>
+</div>
+
+<footer>Educational tool, not financial advice. Trading involves substantial risk of loss.</footer>
+</body>
+</html>

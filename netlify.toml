@@ -1,0 +1,18 @@
+# Netlify configuration for the Trading Toolkit.
+# Static site lives in /web; the scanner runs as a serverless function.
+
+[build]
+  publish = "web"
+  functions = "netlify/functions"
+  # No build step needed for the static frontend. Netlify auto-installs
+  # function dependencies (yahoo-finance2) from package.json.
+  command = "echo 'No build step — static site + function'"
+
+[functions]
+  node_bundler = "esbuild"
+
+# Friendly path: /api/scan -> the serverless function
+[[redirects]]
+  from = "/api/scan"
+  to = "/.netlify/functions/scan"
+  status = 200

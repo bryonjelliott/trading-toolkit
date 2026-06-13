@@ -1,0 +1,304 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Trading Journal</title>
+<link rel="stylesheet" href="/assets/style.css">
+<script src="/assets/config.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.3/dist/chart.umd.min.js"></script>
+</head>
+<body>
+<div class="topbar">
+  <div class="brand"><span>Trading Toolkit</span><small>Trading Journal</small></div>
+  <div class="nav">
+    <a href="/">Home</a>
+    <a href="/scanner.html">Scanner</a>
+    <a href="/journal.html" class="active">Journal</a>
+  </div>
+</div>
+
+<div class="wrap">
+  <div id="cfgBanner"></div>
+
+  <!-- Performance summary -->
+  <div class="card">
+    <h2>Performance</h2>
+    <p class="sub">Computed from <b>closed</b> trades. Win rate, profit factor and expectancy update as you log results.</p>
+    <div class="stats" id="stats"></div>
+    <div class="chart-box"><canvas id="equity"></canvas></div>
+  </div>
+
+  <!-- Add trade -->
+  <div class="card">
+    <h2>Log a trade</h2>
+    <p class="sub">Enter a trade. Leave exit blank to track it as <b>open</b>; fill exit price + date to close it and book P&amp;L.</p>
+    <form id="tradeForm">
+      <div class="formgrid">
+        <div class="field"><label>Ticker *</label><input id="f_ticker" required placeholder="AAPL" style="text-transform:uppercase;"></div>
+        <div class="field"><label>Direction</label><select id="f_direction"><option value="long">Long</option><option value="short">Short</option></select></div>
+        <div class="field"><label>Setup / strategy</label><input id="f_setup" placeholder="ORB, confluence…"></div>
+        <div class="field"><label>Quantity (shares)</label><input id="f_quantity" type="number" step="any" placeholder="100"></div>
+        <div class="field"><label>Entry date</label><input id="f_entry_date" type="date"></div>
+        <div class="field"><label>Entry price</label><input id="f_entry_price" type="number" step="any" placeholder="0.00"></div>
+        <div class="field"><label>Exit date</label><input id="f_exit_date" type="date"></div>
+        <div class="field"><label>Exit price</label><input id="f_exit_price" type="number" step="any" placeholder="0.00"></div>
+        <div class="field"><label>Stop price</label><input id="f_stop_price" type="number" step="any" placeholder="0.00"></div>
+        <div class="field"><label>Target price</label><input id="f_target_price" type="number" step="any" placeholder="0.00"></div>
+        <div class="field"><label>Fees</label><input id="f_fees" type="number" step="any" placeholder="0.00" value="0"></div>
+        <div class="field" style="grid-column:1/-1;"><label>Notes</label><textarea id="f_notes" rows="2" placeholder="Why you took it, how it played out…"></textarea></div>
+      </div>
+      <div class="row" style="margin-top:14px;">
+        <button class="btn" type="submit" id="saveBtn">Save trade</button>
+        <span id="formStatus" class="muted"></span>
+      </div>
+    </form>
+  </div>
+
+  <!-- Trades table -->
+  <div class="card">
+    <div class="row" style="justify-content:space-between;">
+      <h2 style="margin:0;">Trade log</h2>
+      <label class="ctl">Show
+        <select id="statusFilter" onchange="window.renderAll()">
+          <option value="all" selected>All</option>
+          <option value="open">Open</option>
+          <option value="closed">Closed</option>
+        </select>
+      </label>
+    </div>
+    <div class="tablewrap" style="margin-top:12px;">
+      <table>
+        <thead>
+          <tr>
+            <th>Ticker</th><th>Dir</th><th>Setup</th><th>Status</th>
+            <th class="num">Qty</th><th class="num">Entry</th><th class="num">Exit</th>
+            <th class="num">P&amp;L</th><th class="num">P&amp;L %</th><th class="num">R</th>
+            <th>Dates</th><th></th>
+          </tr>
+        </thead>
+        <tbody id="tradeBody">
+          <tr><td colspan="12" class="muted" style="padding:24px;text-align:center;">Loading…</td></tr>
+        </tbody>
+      </table>
+    </div>
+  </div>
+</div>
+
+<footer>Educational tool, not financial advice. Trades stored in your Supabase project.</footer>
+
+<script type="module">
+import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
+
+const cfg = window.APP_CONFIG || {};
+const configured = cfg.SUPABASE_URL && !cfg.SUPABASE_URL.includes("YOUR-PROJECT");
+let sb = null;
+if (configured) sb = createClient(cfg.SUPABASE_URL, cfg.SUPABASE_ANON_KEY);
+
+let TRADES = [];
+let chart = null;
+
+window.renderAll = renderAll;
+window.deleteTrade = deleteTrade;
+window.closeTrade = closeTrade;
+
+// ---- P&L math ----
+function pnlOf(t){
+  if (t.status !== "closed" || t.entry_price == null || t.exit_price == null || t.quantity == null) return null;
+  const dir = t.direction === "short" ? -1 : 1;
+  const gross = (t.exit_price - t.entry_price) * t.quantity * dir;
+  return gross - (Number(t.fees) || 0);
+}
+function pnlPctOf(t){
+  const p = pnlOf(t);
+  if (p == null || !t.entry_price || !t.quantity) return null;
+  return p / (t.entry_price * t.quantity) * 100;
+}
+function rOf(t){
+  const p = pnlOf(t);
+  if (p == null || t.stop_price == null || !t.entry_price || !t.quantity) return null;
+  const risk = Math.abs(t.entry_price - t.stop_price) * t.quantity;
+  if (!risk) return null;
+  return p / risk;
+}
+const money = (v) => (v < 0 ? "-$" : "$") + Math.abs(v).toFixed(2);
+
+// ---- load ----
+async function load(){
+  if (!sb){ TRADES = []; renderAll(); return; }
+  const { data, error } = await sb.from("trades").select("*").order("created_at", { ascending: false });
+  if (error){
+    TRADES = []; renderAll();
+    document.getElementById("tradeBody").innerHTML =
+      `<tr><td colspan="12" style="padding:24px;text-align:center;color:var(--red);">${error.message}` +
+      `<br><span class="muted">Run <code>supabase_schema.sql</code> in your Supabase SQL editor to create the tables.</span></td></tr>`;
+    return;
+  }
+  TRADES = data || [];
+  renderAll();
+}
+
+function renderAll(){ renderStats(); renderTable(); renderChart(); }
+
+// ---- stats ----
+function renderStats(){
+  const closed = TRADES.filter(t => t.status === "closed" && pnlOf(t) != null);
+  const open = TRADES.filter(t => t.status === "open").length;
+  const pnls = closed.map(pnlOf);
+  const wins = pnls.filter(p => p > 0), losses = pnls.filter(p => p < 0);
+  const net = pnls.reduce((a,b)=>a+b, 0);
+  const winRate = closed.length ? (wins.length / closed.length * 100) : 0;
+  const grossWin = wins.reduce((a,b)=>a+b,0), grossLoss = Math.abs(losses.reduce((a,b)=>a+b,0));
+  const pf = grossLoss ? grossWin / grossLoss : (grossWin ? Infinity : 0);
+  const avgWin = wins.length ? grossWin/wins.length : 0;
+  const avgLoss = losses.length ? grossLoss/losses.length : 0;
+  const expectancy = closed.length ? net/closed.length : 0;
+  const best = pnls.length ? Math.max(...pnls) : 0;
+  const worst = pnls.length ? Math.min(...pnls) : 0;
+
+  const cell = (k, v, cls="") => `<div class="stat"><div class="k">${k}</div><div class="v ${cls}">${v}</div></div>`;
+  document.getElementById("stats").innerHTML =
+    cell("Net P&L", money(net), net>0?"green":net<0?"red":"") +
+    cell("Win rate", winRate.toFixed(0)+"%", winRate>=50?"green":"yellow") +
+    cell("Closed / Open", `${closed.length} / ${open}`, "blue") +
+    cell("Profit factor", pf===Infinity?"∞":pf.toFixed(2), pf>=1?"green":"red") +
+    cell("Expectancy", money(expectancy), expectancy>0?"green":expectancy<0?"red":"") +
+    cell("Avg win", money(avgWin), "green") +
+    cell("Avg loss", money(-avgLoss), "red") +
+    cell("Best / Worst", `${money(best)} / ${money(worst)}`);
+}
+
+// ---- equity curve ----
+function renderChart(){
+  const closed = TRADES.filter(t => t.status === "closed" && pnlOf(t) != null)
+    .sort((a,b) => new Date(a.exit_date||a.created_at) - new Date(b.exit_date||b.created_at));
+  let cum = 0;
+  const labels = [], pts = [];
+  closed.forEach((t,i) => { cum += pnlOf(t); labels.push(t.exit_date || `#${i+1}`); pts.push(Number(cum.toFixed(2))); });
+
+  const ctx = document.getElementById("equity");
+  if (chart) chart.destroy();
+  const up = cum >= 0;
+  chart = new Chart(ctx, {
+    type: "line",
+    data: { labels, datasets: [{
+      label: "Cumulative P&L ($)", data: pts,
+      borderColor: up ? "#21d07a" : "#ff5470",
+      backgroundColor: up ? "rgba(33,208,122,.12)" : "rgba(255,84,112,.12)",
+      fill: true, tension: .25, pointRadius: 3, borderWidth: 2,
+    }]},
+    options: {
+      responsive: true, maintainAspectRatio: false,
+      plugins: { legend: { labels: { color: "#8b9bb0" } } },
+      scales: {
+        x: { ticks: { color: "#8b9bb0", maxRotation: 0, autoSkip: true }, grid: { color: "#1f2a37" } },
+        y: { ticks: { color: "#8b9bb0" }, grid: { color: "#1f2a37" } },
+      },
+    },
+  });
+}
+
+// ---- table ----
+function renderTable(){
+  const filter = document.getElementById("statusFilter").value;
+  const rows = TRADES.filter(t => filter === "all" || t.status === filter);
+  const tbody = document.getElementById("tradeBody");
+  if (!rows.length){
+    tbody.innerHTML = `<tr><td colspan="12" class="muted" style="padding:24px;text-align:center;">No trades yet. Log one above.</td></tr>`;
+    return;
+  }
+  tbody.innerHTML = rows.map(t => {
+    const p = pnlOf(t), pct = pnlPctOf(t), r = rOf(t);
+    const pcell = p == null ? '<span class="muted">—</span>'
+      : `<span class="${p>=0?'pnl-pos':'pnl-neg'}">${money(p)}</span>`;
+    const dates = [t.entry_date, t.exit_date].filter(Boolean).join(" → ") || "—";
+    const closeBtn = t.status === "open"
+      ? `<button class="iconbtn" title="Close trade" onclick="window.closeTrade('${t.id}')">✓ close</button>` : "";
+    return `<tr>
+      <td class="tick">${t.ticker}</td>
+      <td><span class="tag ${t.direction}">${t.direction.toUpperCase()}</span></td>
+      <td>${t.setup || "—"}</td>
+      <td><span class="pill ${t.status}">${t.status}</span></td>
+      <td class="num">${t.quantity ?? "—"}</td>
+      <td class="num">${t.entry_price != null ? "$"+Number(t.entry_price).toFixed(2) : "—"}</td>
+      <td class="num">${t.exit_price != null ? "$"+Number(t.exit_price).toFixed(2) : "—"}</td>
+      <td class="num">${pcell}</td>
+      <td class="num">${pct != null ? pct.toFixed(1)+"%" : "—"}</td>
+      <td class="num">${r != null ? r.toFixed(2)+"R" : "—"}</td>
+      <td class="muted">${dates}</td>
+      <td class="num">${closeBtn}<button class="iconbtn" title="Delete" onclick="window.deleteTrade('${t.id}')">🗑</button></td>
+    </tr>`;
+  }).join("");
+}
+
+// ---- mutations ----
+function numOrNull(id){ const v = document.getElementById(id).value; return v === "" ? null : Number(v); }
+function strOrNull(id){ const v = document.getElementById(id).value.trim(); return v === "" ? null : v; }
+
+document.getElementById("tradeForm").addEventListener("submit", async (e) => {
+  e.preventDefault();
+  if (!sb){ setFormStatus("Configure Supabase first (see banner).", true); return; }
+  const exitPrice = numOrNull("f_exit_price");
+  const exitDate = strOrNull("f_exit_date");
+  const trade = {
+    ticker: document.getElementById("f_ticker").value.trim().toUpperCase(),
+    direction: document.getElementById("f_direction").value,
+    setup: strOrNull("f_setup"),
+    quantity: numOrNull("f_quantity"),
+    entry_date: strOrNull("f_entry_date"),
+    entry_price: numOrNull("f_entry_price"),
+    exit_date: exitDate,
+    exit_price: exitPrice,
+    stop_price: numOrNull("f_stop_price"),
+    target_price: numOrNull("f_target_price"),
+    fees: numOrNull("f_fees") || 0,
+    notes: strOrNull("f_notes"),
+    status: (exitPrice != null) ? "closed" : "open",
+  };
+  document.getElementById("saveBtn").disabled = true;
+  const { error } = await sb.from("trades").insert(trade);
+  document.getElementById("saveBtn").disabled = false;
+  if (error){ setFormStatus(error.message, true); return; }
+  e.target.reset();
+  document.getElementById("f_fees").value = "0";
+  setFormStatus("Saved ✓", false);
+  load();
+});
+
+async function closeTrade(id){
+  const price = prompt("Exit price?");
+  if (price === null || price === "") return;
+  const date = prompt("Exit date (YYYY-MM-DD)?", new Date().toISOString().slice(0,10)) || null;
+  const { error } = await sb.from("trades").update({
+    exit_price: Number(price), exit_date: date, status: "closed",
+  }).eq("id", id);
+  if (error) alert(error.message); else load();
+}
+
+async function deleteTrade(id){
+  if (!confirm("Delete this trade?")) return;
+  const { error } = await sb.from("trades").delete().eq("id", id);
+  if (error) alert(error.message); else load();
+}
+
+function setFormStatus(msg, isErr){
+  const el = document.getElementById("formStatus");
+  el.textContent = msg;
+  el.style.color = isErr ? "var(--red)" : "var(--green)";
+  if (!isErr) setTimeout(() => { el.textContent = ""; }, 2500);
+}
+
+function banner(){
+  if (configured) return;
+  document.getElementById("cfgBanner").innerHTML =
+    `<div class="banner">⚙️ <b>Supabase not configured.</b> Edit <code>web/assets/config.js</code> with your
+     project URL and anon key, and run <code>supabase_schema.sql</code> in the Supabase SQL editor.
+     Until then, the journal can't save or load trades.</div>`;
+}
+
+// init
+banner();
+load();
+</script>
+</body>
+</html>

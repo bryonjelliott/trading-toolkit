@@ -1,0 +1,166 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Confluence Scanner</title>
+<link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
+</head>
+<body>
+<div class="topbar">
+  <div class="brand"><span>Trading Toolkit</span><small>Confluence Scanner</small></div>
+  <div class="nav"><a href="/">Home</a><a href="/scanner" class="active">Scanner</a></div>
+</div>
+
+<div class="wrap">
+
+  <div class="card">
+    <div class="row" style="justify-content:space-between;align-items:flex-start;">
+      <div>
+        <h2>Confluence Scanner</h2>
+        <p class="sub">Live scan of the Nasdaq watchlist. Stocks scored on EMA trend, RSI, volume, and SPY/QQQ alignment.
+          <b>S/R signal arrives in Stage 2</b>, so scores are out of 4 this stage.</p>
+      </div>
+      <div id="market" class="market mixed">Market: —</div>
+    </div>
+
+    <div class="row" style="margin-top:6px;">
+      <button id="runBtn" class="btn" onclick="runScan()">Run Scan</button>
+      <label class="ctl">Min signals
+        <select id="minFilter" onchange="render()">
+          <option value="0">All</option>
+          <option value="3" selected>3+</option>
+          <option value="4">4+</option>
+        </select>
+      </label>
+      <label class="ctl">Direction
+        <select id="dirFilter" onchange="render()">
+          <option value="all" selected>All</option>
+          <option value="LONG">Long only</option>
+          <option value="SHORT">Short only</option>
+        </select>
+      </label>
+      <label class="ctl">Search
+        <input id="search" placeholder="ticker…" oninput="render()" style="width:120px;">
+      </label>
+      <span id="status" class="muted" style="margin-left:auto;"></span>
+    </div>
+  </div>
+
+  <div class="card">
+    <div class="tablewrap">
+      <table>
+        <thead>
+          <tr>
+            <th class="num">Eval</th>
+            <th>Ticker</th>
+            <th>Dir</th>
+            <th class="num">Price</th>
+            <th>S/R</th><th>EMA</th><th>RSI</th><th>Vol</th><th>Mkt</th>
+            <th class="num">RSI val</th>
+            <th class="num">Vol ×</th>
+            <th class="num">EMA gap</th>
+          </tr>
+        </thead>
+        <tbody id="tbody">
+          <tr><td colspan="12" class="muted" style="padding:26px;text-align:center;">
+            Click <b>Run Scan</b> to pull live data (takes ~10–30s for ~70 tickers).</td></tr>
+        </tbody>
+      </table>
+    </div>
+    <div class="legend">
+      <b>Signals:</b> <span class="sig pass">✓</span> pass &nbsp;
+      <span class="sig fail">✕</span> fail &nbsp;
+      <span class="sig na">–</span> not yet evaluated (Stage 2). &nbsp;
+      <b>Eval</b> = signals passed of 4. Rows below your Min-signals filter are dimmed when "All" is selected.
+    </div>
+  </div>
+
+</div>
+
+<footer>Educational tool, not financial advice. Data via yfinance through your local backend.</footer>
+
+<script>
+let DATA = null;
+
+async function runScan(){
+  const btn = document.getElementById('runBtn');
+  const status = document.getElementById('status');
+  btn.disabled = true;
+  status.innerHTML = '<span class="spinner"></span> Scanning live data…';
+  document.getElementById('tbody').innerHTML =
+    '<tr><td colspan="12" class="muted" style="padding:26px;text-align:center;">' +
+    '<span class="spinner"></span> Fetching ~70 tickers + benchmarks…</td></tr>';
+  try{
+    const res = await fetch('/api/scan');
+    const json = await res.json();
+    if(json.error){ throw new Error(json.error); }
+    DATA = json;
+    setMarket(json.market);
+    status.textContent =
+      `${json.total} in price band · ${json.qualifying} with ≥${json.min_signals} signals · ` +
+      new Date().toLocaleTimeString();
+    render();
+  }catch(e){
+    status.textContent = 'Error: ' + e.message;
+    document.getElementById('tbody').innerHTML =
+      `<tr><td colspan="12" style="padding:26px;text-align:center;color:var(--red);">${e.message}</td></tr>`;
+  }finally{
+    btn.disabled = false;
+  }
+}
+
+function setMarket(m){
+  const el = document.getElementById('market');
+  el.className = 'market ' + m;
+  const label = {bull:'BULLISH ▲', bear:'BEARISH ▼', mixed:'MIXED ◆'}[m] || '—';
+  el.textContent = 'Market (SPY+QQQ): ' + label;
+}
+
+function sig(v){
+  if(v === true)  return '<span class="sig pass">✓</span>';
+  if(v === false) return '<span class="sig fail">✕</span>';
+  return '<span class="sig na">–</span>';
+}
+function scoreClass(n){ return n >= 4 ? 's-hot' : n >= 3 ? 's-warm' : 's-cold'; }
+function fmt(v, d=2){ return (v === null || v === undefined) ? '—' : Number(v).toFixed(d); }
+
+function render(){
+  if(!DATA) return;
+  const minSig = parseInt(document.getElementById('minFilter').value, 10);
+  const dir = document.getElementById('dirFilter').value;
+  const q = document.getElementById('search').value.trim().toUpperCase();
+
+  const rows = DATA.rows.filter(r => {
+    if(dir !== 'all' && r.direction !== dir) return false;
+    if(q && !r.ticker.includes(q)) return false;
+    if(minSig > 0 && r.passed_eval < minSig) return false;
+    return true;
+  });
+
+  const tbody = document.getElementById('tbody');
+  if(!rows.length){
+    tbody.innerHTML = '<tr><td colspan="12" class="muted" style="padding:26px;text-align:center;">No tickers match the current filters.</td></tr>';
+    return;
+  }
+  tbody.innerHTML = rows.map(r => {
+    const below = (minSig === 0 && r.passed_eval < DATA.min_signals) ? ' class="below"' : '';
+    return `<tr${below}>
+      <td class="num"><span class="score ${scoreClass(r.passed_eval)}">${r.passed_eval}/4</span></td>
+      <td class="tick">${r.ticker}</td>
+      <td><span class="tag ${r.direction.toLowerCase()}">${r.direction}</span></td>
+      <td class="num">$${fmt(r.price)}</td>
+      <td>${sig(r.sig_sr)}</td>
+      <td>${sig(r.sig_ema)}</td>
+      <td>${sig(r.sig_rsi)}</td>
+      <td>${sig(r.sig_vol)}</td>
+      <td>${sig(r.sig_mkt)}</td>
+      <td class="num">${fmt(r.rsi, 1)}</td>
+      <td class="num">${fmt(r.vratio)}</td>
+      <td class="num">${fmt(r.ema_gap)}</td>
+    </tr>`;
+  }).join('');
+}
+</script>
+</body>
+</html>

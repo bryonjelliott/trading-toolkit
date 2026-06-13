@@ -1,0 +1,60 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Trading Toolkit</title>
+<link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
+</head>
+<body>
+<div class="topbar">
+  <div class="brand"><span>Trading Toolkit</span><small>Day-trading research dashboard</small></div>
+  <div class="nav"><a href="/" class="active">Home</a><a href="/scanner">Scanner</a></div>
+</div>
+
+<div class="wrap">
+  <div class="hero">
+    <h1>Your trading tools, one place</h1>
+    <p>Pick a tool to get started. Tools run live against market data via your local backend — nothing leaves your machine.</p>
+  </div>
+
+  <div class="tiles">
+
+    <a class="tile live" href="/scanner">
+      <span class="badge live">Live</span>
+      <div class="icon">📊</div>
+      <h3>Confluence Scanner</h3>
+      <p>Scans a ~70-ticker Nasdaq watchlist for stocks meeting 3+ of 5 confluence signals — EMA trend, RSI, volume, market alignment — and ranks the candidates.</p>
+      <div class="go">Open scanner →</div>
+    </a>
+
+    <div class="tile soon">
+      <span class="badge soon">Stage 2</span>
+      <div class="icon">🎯</div>
+      <h3>Trade Setup Cards</h3>
+      <p>Support/resistance detection plus entry, stop, two targets and 1%-risk position sizing — turns qualifying tickers into full trade plans.</p>
+      <div class="go muted">Coming next</div>
+    </div>
+
+    <div class="tile soon">
+      <span class="badge soon">Stage 3</span>
+      <div class="icon">📰</div>
+      <h3>Premarket Context</h3>
+      <p>Gap %, premarket volume, relative volume (RVOL), ATR and float flags layered onto each candidate for opening-bell context.</p>
+      <div class="go muted">Coming soon</div>
+    </div>
+
+    <div class="tile soon">
+      <span class="badge soon">Stage 5</span>
+      <div class="icon">⏰</div>
+      <h3>Auto Scan Schedule</h3>
+      <p>Automated 9:00 &amp; 9:25 AM ET scans with market-holiday detection, so your watchlist is ready before the open.</p>
+      <div class="go muted">Coming soon</div>
+    </div>
+
+  </div>
+</div>
+
+<footer>Educational tool, not financial advice. Trading involves substantial risk of loss.</footer>
+</body>
+</html>

@@ -1,0 +1,13 @@
+{
+  "name": "trading-toolkit",
+  "version": "1.0.0",
+  "description": "Confluence scanner + trading journal — Netlify static site with serverless scanner function.",
+  "type": "module",
+  "scripts": {
+    "test:scan": "node netlify/functions/scan.mjs --local"
+  },
+  "dependencies": {
+    "@supabase/supabase-js": "2.108.1",
+    "yahoo-finance2": "2.13.3"
+  }
+}
