@@ -82,13 +82,24 @@ export function volumeRatio(volumes, period = 20) {
 // ---------------------------------------------------------------------------
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
+// Reject if `p` doesn't settle within `ms` — bounds a single hung Yahoo call so
+// it can't blow the overall function budget.
+function withTimeout(p, ms, label = "timeout") {
+  return Promise.race([
+    p,
+    new Promise((_, rej) => setTimeout(() => rej(new Error(label)), ms)),
+  ]);
+}
+
 async function fetchDaily(symbol, retries = 2) {
   // ~220 calendar days is plenty for EMA21 / RSI14 / 20d-volume warmup and is
   // much faster to fetch & parse than a full year.
   const period1 = new Date(Date.now() - 220 * 24 * 3600 * 1000);
   for (let attempt = 0; attempt <= retries; attempt++) {
     try {
-      const r = await yahooFinance.chart(symbol, { period1, interval: "1d" });
+      const r = await withTimeout(
+        yahooFinance.chart(symbol, { period1, interval: "1d" }), 6000, "chart timeout"
+      );
       const rows = (r?.quotes || []).filter((q) => q.close != null && q.volume != null);
       return rows.map((q) => ({ close: q.close, high: q.high, low: q.low, volume: q.volume }));
     } catch (e) {
@@ -173,12 +184,13 @@ function evaluate(sym, bars, mkt, livePrice) {
 // ---------------------------------------------------------------------------
 // Core scan
 // ---------------------------------------------------------------------------
-export async function runScan(budgetMs = 24000) {
+export async function runScan(budgetMs = 22000, limitN = 0) {
   const deadline = Date.now() + budgetMs;
+  const list = limitN > 0 ? WATCHLIST.slice(0, limitN) : WATCHLIST;
 
   // Benchmarks FIRST so the market-trend signal is reliable even if the
   // deadline cuts the tail of the watchlist.
-  const all = [...new Set([...CFG.BENCHMARKS, ...WATCHLIST])];
+  const all = [...new Set([...CFG.BENCHMARKS, ...list])];
 
   // Daily history, concurrency-limited, deadline-bounded.
   const bars = {};
@@ -192,7 +204,7 @@ export async function runScan(budgetMs = 24000) {
   const mkt = marketTrend(bars["SPY"], bars["QQQ"]);
 
   const rows = [];
-  for (const sym of WATCHLIST) {
+  for (const sym of list) {
     const res = evaluate(sym, bars[sym], mkt); // price = latest daily close
     if (res) rows.push(res);
   }
@@ -202,7 +214,7 @@ export async function runScan(budgetMs = 24000) {
   return {
     market: mkt, error: null, rows,
     total: rows.length, qualifying, min_signals: CFG.MIN_SIGNALS,
-    fetched: Object.keys(bars).length, watchlist: WATCHLIST.length,
+    fetched: Object.keys(bars).length, watchlist: list.length,
     generated_at: new Date().toISOString(),
   };
 }
@@ -228,9 +240,11 @@ export async function writeCache(payload) {
 // ---------------------------------------------------------------------------
 // Netlify handler (on-demand: GET /api/scan)
 // ---------------------------------------------------------------------------
-export const handler = async () => {
+export const handler = async (event) => {
   try {
-    const payload = await runScan();
+    // ?limit=N scans only the first N watchlist symbols (diagnostic / fast path).
+    const limit = parseInt(event?.queryStringParameters?.limit || "0", 10) || 0;
+    const payload = await runScan(22000, limit);
     const cache = await writeCache(payload);
     payload.cache = cache;
     return {
