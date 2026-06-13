@@ -19,9 +19,9 @@ export default async () => {
 
   // Only overwrite the cache if we got a healthy result — a partial fetch
   // (e.g. transient throttling) shouldn't wipe the last good scan.
-  if (payload.rows.length >= 40) {
+  if (payload.rows.length >= 30) {
     const cache = await writeCache(payload);
-    console.log(`scan-cron: ${payload.rows.length} rows, market=${payload.market}, cached=${cache.cached}`);
+    console.log(`scan-cron: ${payload.rows.length} rows (fetched ${payload.fetched}/${payload.watchlist + 2}), market=${payload.market}, cached=${cache.cached}${cache.reason ? " reason=" + cache.reason : ""}`);
   } else {
     console.log(`scan-cron: only ${payload.rows.length} rows — skipping cache write (kept previous).`);
   }

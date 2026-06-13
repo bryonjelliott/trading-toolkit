@@ -82,8 +82,10 @@ export function volumeRatio(volumes, period = 20) {
 // ---------------------------------------------------------------------------
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
-async function fetchDaily(symbol, retries = 3) {
-  const period1 = new Date(Date.now() - 365 * 24 * 3600 * 1000); // ~1y
+async function fetchDaily(symbol, retries = 2) {
+  // ~220 calendar days is plenty for EMA21 / RSI14 / 20d-volume warmup and is
+  // much faster to fetch & parse than a full year.
+  const period1 = new Date(Date.now() - 220 * 24 * 3600 * 1000);
   for (let attempt = 0; attempt <= retries; attempt++) {
     try {
       const r = await yahooFinance.chart(symbol, { period1, interval: "1d" });
@@ -93,7 +95,7 @@ async function fetchDaily(symbol, retries = 3) {
       const msg = String(e?.message || e);
       const throttled = msg.includes("Too Many") || msg.includes("429");
       if (throttled && attempt < retries) {
-        await sleep(800 * (attempt + 1) + Math.random() * 400); // backoff + jitter
+        await sleep(500 * (attempt + 1) + Math.random() * 300); // backoff + jitter
         continue;
       }
       throw e;
@@ -102,12 +104,15 @@ async function fetchDaily(symbol, retries = 3) {
   return [];
 }
 
-// Limit concurrency so we stay well under the function timeout and avoid throttling.
-async function mapPool(items, limit, worker) {
+// Limit concurrency so we avoid throttling. `deadline` (epoch ms) caps total
+// time: once passed, no new fetches start — we return whatever we collected so
+// the function never hits the hard 30s sandbox timeout.
+async function mapPool(items, limit, worker, deadline) {
   const out = new Array(items.length);
   let i = 0;
   const runners = Array.from({ length: Math.min(limit, items.length) }, async () => {
     while (i < items.length) {
+      if (deadline && Date.now() > deadline) return;
       const idx = i++;
       try { out[idx] = await worker(items[idx]); }
       catch (e) { out[idx] = { __error: String(e?.message || e) }; }
@@ -168,31 +173,27 @@ function evaluate(sym, bars, mkt, livePrice) {
 // ---------------------------------------------------------------------------
 // Core scan
 // ---------------------------------------------------------------------------
-export async function runScan() {
-  const all = [...new Set([...WATCHLIST, ...CFG.BENCHMARKS])];
+export async function runScan(budgetMs = 24000) {
+  const deadline = Date.now() + budgetMs;
 
-  // Live prices (one batched call) — best-effort, falls back to last close.
-  const livePrice = {};
-  try {
-    const quotes = await yahooFinance.quote(all);
-    for (const q of quotes || []) {
-      const p = q.preMarketPrice ?? q.regularMarketPrice ?? q.postMarketPrice;
-      if (p != null) livePrice[q.symbol] = p;
-    }
-  } catch (_) { /* non-fatal */ }
+  // Benchmarks FIRST so the market-trend signal is reliable even if the
+  // deadline cuts the tail of the watchlist.
+  const all = [...new Set([...CFG.BENCHMARKS, ...WATCHLIST])];
 
-  // Daily history, concurrency-limited (low to avoid Yahoo rate limits).
+  // Daily history, concurrency-limited, deadline-bounded.
   const bars = {};
-  const results = await mapPool(all, 6, async (sym) => ({ sym, data: await fetchDaily(sym) }));
+  const results = await mapPool(
+    all, 8, async (sym) => ({ sym, data: await fetchDaily(sym) }), deadline
+  );
   for (const r of results) {
-    if (r && r.sym && !r.__error) bars[r.sym] = r.data;
+    if (r && r.sym && !r.__error && r.data?.length) bars[r.sym] = r.data;
   }
 
   const mkt = marketTrend(bars["SPY"], bars["QQQ"]);
 
   const rows = [];
   for (const sym of WATCHLIST) {
-    const res = evaluate(sym, bars[sym], mkt, livePrice[sym]);
+    const res = evaluate(sym, bars[sym], mkt); // price = latest daily close
     if (res) rows.push(res);
   }
   rows.sort((a, b) => b.passed_eval - a.passed_eval || a.ticker.localeCompare(b.ticker));
@@ -201,6 +202,7 @@ export async function runScan() {
   return {
     market: mkt, error: null, rows,
     total: rows.length, qualifying, min_signals: CFG.MIN_SIGNALS,
+    fetched: Object.keys(bars).length, watchlist: WATCHLIST.length,
     generated_at: new Date().toISOString(),
   };
 }
@@ -249,7 +251,7 @@ export const handler = async () => {
 if (process.argv.includes("--local")) {
   const t0 = Date.now();
   runScan().then((r) => {
-    console.log(`market=${r.market}  total=${r.total}  qualifying=${r.qualifying}  (${((Date.now()-t0)/1000).toFixed(1)}s)`);
+    console.log(`market=${r.market}  fetched=${r.fetched}/${r.watchlist + 2}  total=${r.total}  qualifying=${r.qualifying}  (${((Date.now()-t0)/1000).toFixed(1)}s)`);
     console.log("top rows:");
     for (const row of r.rows.slice(0, 8)) {
       console.log(
