@@ -47,7 +47,10 @@
         </select>
       </label>
       <label class="ctl">Search
-        <input id="search" placeholder="ticker…" oninput="render()" style="width:120px;">
+        <input id="search" placeholder="ticker…" oninput="render()" style="width:110px;">
+      </label>
+      <label class="ctl">Account $
+        <input id="acctInput" type="number" step="100" min="0" style="width:95px;" title="Drives 1%-risk position sizing in the trade cards">
       </label>
       <span id="status" class="updated" style="margin-left:auto;"></span>
     </div>
@@ -101,7 +104,7 @@
         <li>Risk a max of <b>1% per trade</b>. A few A-setups beat many marginal ones.</li>
       </ul>
 
-      <div class="pb-note">Educational reference only, not financial advice. This scanner currently evaluates signals 2–5 (scored x/4); the S/R signal and the full entry/stop/target trade cards arrive in Stage 2.</div>
+      <div class="pb-note">Educational reference only, not financial advice. This scanner evaluates signals 2–5 (scored x/4); the S/R signal is still to come. Trade cards use an <b>ATR-based stop</b> (0.75× ATR) for now — they'll switch to S/R-based stops once that signal lands.</div>
     </div>
   </details>
 
@@ -110,13 +113,14 @@
       <table>
         <thead>
           <tr>
+            <th></th>
             <th class="num">Eval</th><th>Ticker</th><th>Dir</th><th class="num">Price</th>
             <th>S/R</th><th>EMA</th><th>RSI</th><th>Vol</th><th>Mkt</th>
             <th class="num">RSI val</th><th class="num">Vol ×</th><th class="num">EMA gap</th>
           </tr>
         </thead>
         <tbody id="tbody">
-          <tr><td colspan="12" class="muted" style="padding:26px;text-align:center;">Loading cached scan…</td></tr>
+          <tr><td colspan="13" class="muted" style="padding:26px;text-align:center;">Loading cached scan…</td></tr>
         </tbody>
       </table>
     </div>
@@ -124,7 +128,7 @@
       <b>Signals:</b> <span class="sig pass">✓</span> pass &nbsp;
       <span class="sig fail">✕</span> fail &nbsp;
       <span class="sig na">–</span> not yet evaluated (Stage 2). &nbsp;
-      <b>Eval</b> = signals passed of 4.
+      <b>Eval</b> = signals passed of 4. &nbsp; Click <b>▸</b> on a row for its trade plan (entry / stop / targets / size).
     </div>
   </div>
 </div>
@@ -200,6 +204,63 @@ function sig(v){
 const scoreClass = (n) => n >= 4 ? "s-hot" : n >= 3 ? "s-warm" : "s-cold";
 const fmt = (v, d=2) => (v === null || v === undefined) ? "—" : Number(v).toFixed(d);
 
+const expanded = new Set();
+const RISK_PCT = 0.01;
+const money = (v) => (v < 0 ? "-$" : "$") + Math.abs(Number(v)).toFixed(2);
+
+function getAccount(){
+  const v = parseFloat(localStorage.getItem("acctSize"));
+  return (v && v > 0) ? v : 10000;
+}
+function setAccount(v){
+  const n = parseFloat(v);
+  if (n && n > 0) localStorage.setItem("acctSize", n);
+  render();
+}
+window.setAccount = setAccount;
+window.toggleRow = toggleRow;
+
+function toggleRow(t){
+  if (expanded.has(t)) expanded.delete(t); else expanded.add(t);
+  const dr = document.getElementById("d_" + t);
+  const tg = document.getElementById("t_" + t);
+  if (dr) dr.style.display = expanded.has(t) ? "" : "none";
+  if (tg) tg.textContent = expanded.has(t) ? "▾" : "▸";
+}
+
+function tradeCard(r){
+  const s = r.setup;
+  if (!s) return '<div class="muted" style="padding:12px 16px;">No trade setup (insufficient data).</div>';
+  const acct = getAccount();
+  const shares = s.stop_dist > 0 ? Math.floor((acct * RISK_PCT) / s.stop_dist) : 0;
+  const cost = shares * s.entry;
+  const atRisk = shares * s.stop_dist;
+  const stopPct = (s.stop_dist / s.entry) * 100;
+  const long = r.direction === "LONG";
+  const trigger = long ? s.prior_high : s.prior_low;
+  return `
+  <div class="tradecard">
+    <div class="tc-head">
+      <span class="tick">${r.ticker}</span>
+      <span class="tag ${r.direction.toLowerCase()}">${r.direction}</span>
+      <span class="score ${scoreClass(r.passed_eval)}">${r.passed_eval}/4</span>
+      <span class="muted" style="margin-left:auto;">ATR(14) ${money(s.atr)} · prior H ${money(s.prior_high)} / L ${money(s.prior_low)}</span>
+    </div>
+    <div class="stats">
+      <div class="stat"><div class="k">Entry ${long ? "(break ↑)" : "(break ↓)"}</div><div class="v blue">${money(s.entry)}</div></div>
+      <div class="stat"><div class="k">Stop</div><div class="v red">${money(s.stop)}</div><div class="sub">−${money(s.stop_dist)} · −${stopPct.toFixed(1)}%</div></div>
+      <div class="stat"><div class="k">Target 1 · 1R</div><div class="v green">${money(s.t1)}</div><div class="sub">exit 50% · ${stopPct.toFixed(1)}%</div></div>
+      <div class="stat"><div class="k">Target 2 · 2R</div><div class="v green">${money(s.t2)}</div><div class="sub">exit 50% · ${(stopPct * 2).toFixed(1)}%</div></div>
+      <div class="stat"><div class="k">Shares (1% risk)</div><div class="v">${shares.toLocaleString()}</div></div>
+      <div class="stat"><div class="k">Position cost</div><div class="v">${money(cost)}</div></div>
+      <div class="stat"><div class="k">$ at risk</div><div class="v red">${money(atRisk)}</div></div>
+    </div>
+    <div class="tc-note">Enter on the ${long ? "break above" : "break below"} ${money(trigger)} (prior-session ${long ? "high" : "low"}), stop ${money(s.stop)}.
+      Scale 50% at ${money(s.t1)} (1R) → move stop to breakeven → trail the rest toward ${money(s.t2)} (2R).
+      Sizing on a ${money(acct)} account at 1% risk. Stop is 0.75× ATR (switches to S/R-based in the next stage).</div>
+  </div>`;
+}
+
 function render(){
   if (!DATA) return;
   const minSig = parseInt(document.getElementById("minFilter").value, 10);
@@ -215,12 +276,17 @@ function render(){
 
   const tbody = document.getElementById("tbody");
   if (!rows.length){
-    tbody.innerHTML = '<tr><td colspan="12" class="muted" style="padding:26px;text-align:center;">No tickers match the current filters.</td></tr>';
+    tbody.innerHTML = '<tr><td colspan="13" class="muted" style="padding:26px;text-align:center;">No tickers match the current filters.</td></tr>';
     return;
   }
   tbody.innerHTML = rows.map(r => {
     const below = (minSig === 0 && r.passed_eval < DATA.min_signals) ? ' class="below"' : '';
-    return `<tr${below}>
+    const open = expanded.has(r.ticker);
+    const toggle = r.setup
+      ? `<td><button class="toggle-btn" id="t_${r.ticker}" onclick="toggleRow('${r.ticker}')">${open ? "▾" : "▸"}</button></td>`
+      : "<td></td>";
+    const rowHtml = `<tr${below}>
+      ${toggle}
       <td class="num"><span class="score ${scoreClass(r.passed_eval)}">${r.passed_eval}/4</span></td>
       <td class="tick">${r.ticker}</td>
       <td><span class="tag ${r.direction.toLowerCase()}">${r.direction}</span></td>
@@ -229,15 +295,22 @@ function render(){
       <td>${sig(r.sig_vol)}</td><td>${sig(r.sig_mkt)}</td>
       <td class="num">${fmt(r.rsi,1)}</td><td class="num">${fmt(r.vratio)}</td><td class="num">${fmt(r.ema_gap)}</td>
     </tr>`;
+    const detail = r.setup
+      ? `<tr class="detailrow" id="d_${r.ticker}" style="display:${open ? "" : "none"}"><td colspan="13">${tradeCard(r)}</td></tr>`
+      : "";
+    return rowHtml + detail;
   }).join("");
 }
 
 // init
 banner();
+const acctEl = document.getElementById("acctInput");
+acctEl.value = getAccount();
+acctEl.addEventListener("change", () => setAccount(acctEl.value));
 const hadCache = await loadCache();
 if (!hadCache){
   document.getElementById("tbody").innerHTML =
-    '<tr><td colspan="12" class="muted" style="padding:26px;text-align:center;">No cached scan yet — click <b>Refresh now</b> to run one.</td></tr>';
+    '<tr><td colspan="13" class="muted" style="padding:26px;text-align:center;">No cached scan yet — click <b>Refresh</b> to run one.</td></tr>';
 }
 </script>
 </body>

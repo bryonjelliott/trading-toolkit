@@ -13,8 +13,11 @@ is currently scored out of 4 evaluated signals (shown as "x/4 eval").
 Run:  py -3.11 scanner.py
 """
 from __future__ import annotations
+import math
 import sys
 import warnings
+from datetime import datetime
+from zoneinfo import ZoneInfo
 
 # Ensure UTF-8 / clean output on Windows consoles
 try:
@@ -26,7 +29,53 @@ import pandas as pd
 import yfinance as yf
 
 import config as C
-from indicators import ema, rsi, volume_ratio, last
+from indicators import ema, rsi, atr, volume_ratio, last
+
+STOP_ATR_MULT = 0.75   # stop sits 0.75 x ATR from entry (Stage 2 default)
+ENTRY_BUFFER = 0.05    # breakout/breakdown trigger offset (spec: $0.05)
+
+
+def _prior_session(df):
+    """Last *completed* daily bar — skip today's still-forming bar if present."""
+    try:
+        last_date = df.index[-1].date()
+        today = datetime.now(ZoneInfo("America/New_York")).date()
+        if last_date == today and len(df) >= 2:
+            return df.iloc[-2]
+    except Exception:
+        pass
+    return df.iloc[-1]
+
+
+def build_setup(df, direction: str):
+    """Entry / stop / targets / stop-distance from prior-session levels + ATR."""
+    atr_val = last(atr(df["High"], df["Low"], df["Close"], C.ATR_PERIOD))
+    if atr_val is None or math.isnan(atr_val) or atr_val <= 0:
+        return None
+
+    prior = _prior_session(df)
+    ph, pl = float(prior["High"]), float(prior["Low"])
+    dist = STOP_ATR_MULT * atr_val
+
+    if direction == "LONG":
+        entry = ph + ENTRY_BUFFER
+        stop = entry - dist
+        t1, t2 = entry + dist, entry + 2 * dist
+    else:
+        entry = pl - ENTRY_BUFFER
+        stop = entry + dist
+        t1, t2 = entry - dist, entry - 2 * dist
+
+    return {
+        "atr": round(atr_val, 4),
+        "prior_high": round(ph, 2),
+        "prior_low": round(pl, 2),
+        "entry": round(entry, 2),
+        "stop": round(stop, 2),
+        "stop_dist": round(dist, 4),
+        "t1": round(t1, 2),
+        "t2": round(t2, 2),
+    }
 
 warnings.simplefilter("ignore", category=FutureWarning)
 
@@ -131,6 +180,7 @@ def evaluate(sym: str, df: pd.DataFrame, mkt: str) -> dict | None:
         "sig_vol": sig_vol,
         "sig_mkt": sig_mkt,
         "passed_eval": passed,  # out of 4 evaluated signals this stage
+        "setup": build_setup(df, direction),  # entry/stop/targets/ATR
     }
 
 
