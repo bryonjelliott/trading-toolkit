@@ -8,6 +8,14 @@
   # function dependencies (yahoo-finance2) from package.json.
   command = "echo 'No build step — static site + function'"
 
+[build.environment]
+  # SUPABASE_URL and the anon key are PUBLIC client config — they live in
+  # web/assets/config.js by design (every browser needs them). Exempt them so
+  # Netlify's secret scanner doesn't fail the build. The real secret,
+  # SUPABASE_SERVICE_KEY, is never in the code and stays fully scanned everywhere.
+  SECRETS_SCAN_OMIT_KEYS = "SUPABASE_URL"
+  SECRETS_SCAN_OMIT_PATHS = "web/assets/config.js"
+
 [functions]
   node_bundler = "esbuild"
 
