@@ -1,0 +1,30 @@
+name: Confluence scan -> Supabase
+
+# Yahoo Finance blocks Netlify's datacenter IPs, so the scan runs here (GitHub
+# Actions can reach Yahoo) and writes the result to Supabase. The website reads
+# that cache, so this is what keeps the live scanner fresh.
+
+on:
+  schedule:
+    # Every 30 minutes, ~premarket through the close, on weekdays (UTC).
+    - cron: "*/30 10-21 * * 1-5"
+  workflow_dispatch: {}   # lets you run it manually from the Actions tab
+
+jobs:
+  scan:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install dependencies
+        run: pip install --quiet yfinance pandas numpy requests
+
+      - name: Run scan and write to Supabase
+        env:
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_SERVICE_KEY: ${{ secrets.SUPABASE_SERVICE_KEY }}
+        run: python scan_to_supabase.py

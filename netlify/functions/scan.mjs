@@ -245,7 +245,11 @@ export const handler = async (event) => {
     // ?limit=N scans only the first N watchlist symbols (diagnostic / fast path).
     const limit = parseInt(event?.queryStringParameters?.limit || "0", 10) || 0;
     const payload = await runScan(22000, limit);
-    const cache = await writeCache(payload);
+    // Yahoo blocks Netlify, so this usually returns 0 rows. Never let that
+    // overwrite the good cache that GitHub Actions maintains.
+    const cache = payload.rows.length >= 30
+      ? await writeCache(payload)
+      : { cached: false, reason: `only ${payload.rows.length} rows — not overwriting cache` };
     payload.cache = cache;
     return {
       statusCode: 200,

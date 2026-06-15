@@ -25,13 +25,13 @@
       <div>
         <h2>Confluence Scanner</h2>
         <p class="sub">Nasdaq watchlist scored on EMA trend, RSI, volume, and SPY/QQQ alignment.
-          Results are cached and auto-refreshed every 15 min. <b>S/R signal arrives in Stage 2</b> (scores out of 4).</p>
+          Refreshed every ~30 min by a scheduled job, cached in Supabase. <b>S/R signal arrives in Stage 2</b> (scores out of 4).</p>
       </div>
       <div id="market" class="market mixed">Market: —</div>
     </div>
 
     <div class="row" style="margin-top:6px;">
-      <button id="refreshBtn" class="btn" onclick="refreshLive()">Refresh now</button>
+      <button id="refreshBtn" class="btn" onclick="refreshLive()">Refresh</button>
       <label class="ctl">Min signals
         <select id="minFilter" onchange="render()">
           <option value="0">All</option>
@@ -113,27 +113,15 @@ async function loadCache(){
 }
 
 async function refreshLive(){
+  // The scan itself is run by the scheduled GitHub Action (Yahoo blocks
+  // Netlify). "Refresh" just re-pulls the latest cached result from Supabase.
   const btn = document.getElementById("refreshBtn");
   const status = document.getElementById("status");
   btn.disabled = true;
-  status.innerHTML = '<span class="spinner"></span> Running live scan…';
-  document.getElementById("tbody").innerHTML =
-    '<tr><td colspan="12" class="muted" style="padding:26px;text-align:center;"><span class="spinner"></span> Fetching live data…</td></tr>';
-  try {
-    const res = await fetch("/api/scan");
-    const json = await res.json();
-    if (json.error) throw new Error(json.error);
-    DATA = json;
-    setMarket(json.market);
-    setUpdated(json.generated_at);
-    render();
-  } catch (e) {
-    status.textContent = "Live scan unavailable: " + e.message;
-    // fall back to cache if we have it
-    if (!DATA) await loadCache();
-  } finally {
-    btn.disabled = false;
-  }
+  status.innerHTML = '<span class="spinner"></span> Reloading…';
+  const ok = await loadCache();
+  if (!ok) status.textContent = "No cached scan available yet — the scheduled job may not have run.";
+  btn.disabled = false;
 }
 
 function setUpdated(iso){
