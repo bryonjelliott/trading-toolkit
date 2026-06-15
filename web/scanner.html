@@ -24,8 +24,8 @@
     <div class="row" style="justify-content:space-between;align-items:flex-start;">
       <div>
         <h2>Confluence Scanner</h2>
-        <p class="sub">Nasdaq watchlist scored on EMA trend, RSI, volume, and SPY/QQQ alignment.
-          Refreshed every ~30 min by a scheduled job, cached in Supabase. <b>S/R signal arrives in Stage 2</b> (scores out of 4).</p>
+        <p class="sub">Nasdaq watchlist scored on all 5 confluence signals — S/R, EMA trend, RSI, volume, and SPY/QQQ alignment.
+          Refreshed every ~30 min by a scheduled job, cached in Supabase. <b>Scores out of 5.</b></p>
       </div>
       <div id="market" class="market mixed">Market: —</div>
     </div>
@@ -65,7 +65,7 @@
 
       <h4>The 5 confluence signals</h4>
       <ul>
-        <li><span class="signum">1</span><b>Price near support / resistance</b> — within 1.5% of a key level price has reversed at twice before. Long near support, short near resistance. <span class="muted">(Stage 2 — shows "–" for now.)</span></li>
+        <li><span class="signum">1</span><b>Price near support / resistance</b> — within 1.5% of a key level price has reversed at twice before (swing pivots, clustered over the past year). Long near support, short near resistance; the level also anchors the stop.</li>
         <li><span class="signum">2</span><b>EMA 9/21 alignment</b> — EMA9 above EMA21 = uptrend (long bias); below = downtrend (short bias). A wider gap means a stronger trend.</li>
         <li><span class="signum">3</span><b>RSI 14 filter</b> — passes between 28 and 74. Skips overbought (≥75, chasing) and oversold (≤27, catching a falling knife).</li>
         <li><span class="signum">4</span><b>Volume confirmation</b> — yesterday's volume ≥ 1.1× its 20-day average. Confirms real participation behind the move.</li>
@@ -104,7 +104,7 @@
         <li>Risk a max of <b>1% per trade</b>. A few A-setups beat many marginal ones.</li>
       </ul>
 
-      <div class="pb-note">Educational reference only, not financial advice. This scanner evaluates signals 2–5 (scored x/4); the S/R signal is still to come. Trade cards use an <b>ATR-based stop</b> (0.75× ATR) for now — they'll switch to S/R-based stops once that signal lands.</div>
+      <div class="pb-note">Educational reference only, not financial advice. All 5 signals are evaluated (scored x/5). The stop uses the <b>nearest S/R level</b> when one is in range, otherwise <b>0.75× ATR</b> — whichever sits closer to entry. Setups whose stop falls outside 0.5–1.5× ATR are flagged <b>"review."</b></div>
     </div>
   </details>
 
@@ -126,9 +126,8 @@
     </div>
     <div class="legend">
       <b>Signals:</b> <span class="sig pass">✓</span> pass &nbsp;
-      <span class="sig fail">✕</span> fail &nbsp;
-      <span class="sig na">–</span> not yet evaluated (Stage 2). &nbsp;
-      <b>Eval</b> = signals passed of 4. &nbsp; Click <b>▸</b> on a row for its trade plan (entry / stop / targets / size).
+      <span class="sig fail">✕</span> fail. &nbsp;
+      <b>Eval</b> = signals passed of 5 (S/R · EMA · RSI · Vol · Mkt). &nbsp; Click <b>▸</b> on a row for its trade plan (entry / stop / targets / size).
     </div>
   </div>
 </div>
@@ -243,19 +242,20 @@ function tradeCard(r){
     <div class="tc-head">
       <span class="tick">${r.ticker}</span>
       <span class="tag ${r.direction.toLowerCase()}">${r.direction}</span>
-      <span class="score ${scoreClass(r.passed_eval)}">${r.passed_eval}/4</span>
-      <span class="muted" style="margin-left:auto;">ATR(14) ${money(s.atr)} · prior H ${money(s.prior_high)} / L ${money(s.prior_low)}</span>
+      <span class="score ${scoreClass(r.passed_eval)}">${r.passed_eval}/5</span>
+      <span class="muted" style="margin-left:auto;">ATR(14) ${money(s.atr)}${s.sr_level != null ? " · S/R " + money(s.sr_level) : ""} · prior H ${money(s.prior_high)} / L ${money(s.prior_low)}</span>
     </div>
     <div class="stats">
       <div class="stat"><div class="k">Entry ${long ? "(break ↑)" : "(break ↓)"}</div><div class="v blue">${money(s.entry)}</div></div>
-      <div class="stat"><div class="k">Stop</div><div class="v red">${money(s.stop)}</div><div class="sub">−${money(s.stop_dist)} · −${stopPct.toFixed(1)}%</div></div>
+      <div class="stat"><div class="k">Stop</div><div class="v red">${money(s.stop)}</div><div class="sub">−${money(s.stop_dist)} · −${stopPct.toFixed(1)}% · ${s.stop_basis}</div></div>
       <div class="stat"><div class="k">Target 1 · 1R</div><div class="v green">${money(s.t1)}</div><div class="sub">exit 50% · ${stopPct.toFixed(1)}%</div></div>
       <div class="stat"><div class="k">Target 2 · 2R</div><div class="v green">${money(s.t2)}</div><div class="sub">exit 50% · ${(stopPct * 2).toFixed(1)}%</div></div>
       <div class="stat"><div class="k">Shares (1% risk)</div><div class="v">${shares.toLocaleString()}</div></div>
       <div class="stat"><div class="k">Position cost</div><div class="v">${money(cost)}</div></div>
       <div class="stat"><div class="k">$ at risk</div><div class="v red">${money(atRisk)}</div></div>
     </div>
-    <div class="tc-note">Enter on the ${long ? "break above" : "break below"} ${money(trigger)} (prior-session ${long ? "high" : "low"}), stop ${money(s.stop)}.
+    ${s.abnormal ? '<div class="tc-warn">⚠ Stop distance is outside 0.5–1.5× ATR — unusually tight or wide. Review manually before sizing.</div>' : ""}
+    <div class="tc-note">Enter on the ${long ? "break above" : "break below"} ${money(trigger)} (prior-session ${long ? "high" : "low"}), stop ${money(s.stop)}${s.stop_basis === "S/R" ? " (at the S/R level)" : ""}.
       Scale 50% at ${money(s.t1)} (1R) → move stop to breakeven → trail the rest toward ${money(s.t2)} (2R).
       Sizing on a ${money(acct)} account at 1% risk. Stop is 0.75× ATR (switches to S/R-based in the next stage).</div>
   </div>`;
@@ -287,7 +287,7 @@ function render(){
       : "<td></td>";
     const rowHtml = `<tr${below}>
       ${toggle}
-      <td class="num"><span class="score ${scoreClass(r.passed_eval)}">${r.passed_eval}/4</span></td>
+      <td class="num"><span class="score ${scoreClass(r.passed_eval)}">${r.passed_eval}/5</span></td>
       <td class="tick">${r.ticker}</td>
       <td><span class="tag ${r.direction.toLowerCase()}">${r.direction}</span></td>
       <td class="num">$${fmt(r.price)}</td>

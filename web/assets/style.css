@@ -139,6 +139,8 @@ details.playbook>summary:hover{color:var(--accent);}
 .tc-head{display:flex;align-items:center;gap:8px;font-size:14px;margin-bottom:10px;flex-wrap:wrap;}
 .tc-head .tick{font-size:15px;}
 .tc-note{margin-top:11px;font-size:12px;color:var(--muted);line-height:1.6;}
+.tc-warn{margin-top:11px;background:rgba(255,207,86,.08);border:1px solid rgba(255,207,86,.3);
+  border-radius:8px;padding:8px 11px;color:var(--yellow);font-size:12px;}
 .tradecard .stat .sub{color:var(--muted);font-size:10.5px;margin-top:3px;}
 .toggle-btn{background:transparent;border:none;color:var(--accent);cursor:pointer;font-size:13px;
   padding:2px 6px;font-weight:800;}

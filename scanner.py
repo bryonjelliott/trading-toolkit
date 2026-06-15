@@ -47,25 +47,83 @@ def _prior_session(df):
     return df.iloc[-1]
 
 
-def build_setup(df, direction: str):
-    """Entry / stop / targets / stop-distance from prior-session levels + ATR."""
+def sr_levels(df, lookback=252, swing=5, cluster_pct=0.01, min_touches=2):
+    """
+    Horizontal support/resistance levels: swing-pivot highs/lows (a bar that is
+    the extreme of a +/- `swing` window) clustered within `cluster_pct`; a cluster
+    of >= `min_touches` pivots becomes a level (price reversed there repeatedly).
+    """
+    data = df.iloc[-lookback:]
+    highs = [float(x) for x in data["High"].values]
+    lows = [float(x) for x in data["Low"].values]
+    n = len(highs)
+    pivots = []
+    for i in range(swing, n - swing):
+        if highs[i] >= max(highs[i - swing:i + swing + 1]):
+            pivots.append(highs[i])
+        if lows[i] <= min(lows[i - swing:i + swing + 1]):
+            pivots.append(lows[i])
+    pivots = sorted(p for p in pivots if p == p and p > 0)  # drop NaN/zero
+
+    levels, used = [], [False] * len(pivots)
+    for i, p in enumerate(pivots):
+        if used[i]:
+            continue
+        cluster = [p]
+        used[i] = True
+        for j in range(i + 1, len(pivots)):
+            if (pivots[j] - p) / p <= cluster_pct:
+                cluster.append(pivots[j])
+                used[j] = True
+            else:
+                break  # sorted: nothing further is in range
+        if len(cluster) >= min_touches:
+            levels.append(sum(cluster) / len(cluster))
+    return levels
+
+
+def sr_signal(levels, price, direction, proximity=C.SR_PROXIMITY_PCT):
+    """(passed, nearest_level): long needs an active support, short an active resistance."""
+    if not levels or not price:
+        return False, None
+    if direction == "LONG":
+        cand = [L for L in levels if L <= price and (price - L) / price <= proximity]
+        return (True, max(cand)) if cand else (False, None)
+    cand = [L for L in levels if L >= price and (L - price) / price <= proximity]
+    return (True, min(cand)) if cand else (False, None)
+
+
+def build_setup(df, direction: str, sr_level=None):
+    """Entry / stop / targets. Stop = nearest S/R beyond entry or 0.75x ATR,
+    whichever is closer to entry (per spec); flag if outside 0.5-1.5x ATR."""
     atr_val = last(atr(df["High"], df["Low"], df["Close"], C.ATR_PERIOD))
     if atr_val is None or math.isnan(atr_val) or atr_val <= 0:
         return None
 
     prior = _prior_session(df)
     ph, pl = float(prior["High"]), float(prior["Low"])
-    dist = STOP_ATR_MULT * atr_val
+    atr_dist = STOP_ATR_MULT * atr_val
 
     if direction == "LONG":
         entry = ph + ENTRY_BUFFER
-        stop = entry - dist
+        stop, basis = entry - atr_dist, "ATR"
+        if sr_level is not None and sr_level < entry:
+            sr_stop = sr_level * (1 - 0.001)         # just below support
+            if sr_stop > stop:                       # closer to entry = tighter
+                stop, basis = sr_stop, "S/R"
+        dist = entry - stop
         t1, t2 = entry + dist, entry + 2 * dist
     else:
         entry = pl - ENTRY_BUFFER
-        stop = entry + dist
+        stop, basis = entry + atr_dist, "ATR"
+        if sr_level is not None and sr_level > entry:
+            sr_stop = sr_level * (1 + 0.001)         # just above resistance
+            if sr_stop < stop:
+                stop, basis = sr_stop, "S/R"
+        dist = stop - entry
         t1, t2 = entry - dist, entry - 2 * dist
 
+    abnormal = not (0.5 * atr_val <= dist <= 1.5 * atr_val)
     return {
         "atr": round(atr_val, 4),
         "prior_high": round(ph, 2),
@@ -75,6 +133,9 @@ def build_setup(df, direction: str):
         "stop_dist": round(dist, 4),
         "t1": round(t1, 2),
         "t2": round(t2, 2),
+        "sr_level": round(sr_level, 2) if sr_level is not None else None,
+        "stop_basis": basis,
+        "abnormal": abnormal,
     }
 
 warnings.simplefilter("ignore", category=FutureWarning)
@@ -144,6 +205,10 @@ def evaluate(sym: str, df: pd.DataFrame, mkt: str) -> dict | None:
     e21 = last(ema(df["Close"], C.EMA_LONG))
     direction = "LONG" if e9 >= e21 else "SHORT"
 
+    # Signal 1 — price within 1.5% of an active support (long) / resistance (short)
+    levels = sr_levels(df)
+    sig_sr, sr_level = sr_signal(levels, price, direction)
+
     # Signal 2 — EMA alignment matches direction (always true by construction,
     # but we record the gap strength for later use)
     ema_gap = e9 - e21
@@ -163,7 +228,7 @@ def evaluate(sym: str, df: pd.DataFrame, mkt: str) -> dict | None:
     else:
         sig_mkt = (mkt == "bear")
 
-    passed = sum([sig_ema, sig_rsi, sig_vol, sig_mkt])
+    passed = sum([sig_sr, sig_ema, sig_rsi, sig_vol, sig_mkt])
 
     return {
         "ticker": sym,
@@ -174,13 +239,13 @@ def evaluate(sym: str, df: pd.DataFrame, mkt: str) -> dict | None:
         "ema_gap": ema_gap,
         "rsi": rsi_val,
         "vratio": vratio,
-        "sig_sr": None,       # Stage 2
+        "sig_sr": sig_sr,
         "sig_ema": sig_ema,
         "sig_rsi": sig_rsi,
         "sig_vol": sig_vol,
         "sig_mkt": sig_mkt,
-        "passed_eval": passed,  # out of 4 evaluated signals this stage
-        "setup": build_setup(df, direction),  # entry/stop/targets/ATR
+        "passed_eval": passed,  # out of 5 signals
+        "setup": build_setup(df, direction, sr_level),  # entry/stop/targets/ATR/S-R
     }
 
 
@@ -196,7 +261,7 @@ def print_table(rows: list[dict], mkt: str) -> None:
 
     print()
     print("=" * 96)
-    print(f"  CONFLUENCE SCANNER - STAGE 1   |   Market trend (SPY+QQQ): {mkt.upper()}")
+    print(f"  CONFLUENCE SCANNER   |   Market trend (SPY+QQQ): {mkt.upper()}")
     print("=" * 96)
     hdr = (f"{'TICK':<6}{'PRICE':>9}{'DIR':>6}   "
            f"{'S/R':>5}{'EMA':>6}{'RSI':>6}{'VOL':>6}{'MKT':>6}   "
@@ -216,15 +281,14 @@ def print_table(rows: list[dict], mkt: str) -> None:
             f"{r['rsi']:>7.1f}"
             f"{r['vratio']:>7.2f}"
             f"{r['ema_gap']:>8.2f}   "
-            f"{r['passed_eval']:>4}/4"
+            f"{r['passed_eval']:>4}/5"
         )
     print("-" * 96)
     qualifying = [r for r in rows if r["passed_eval"] >= C.MIN_SIGNALS]
     print(f"  {len(rows)} tickers in price band | "
-          f"{len(qualifying)} with >= {C.MIN_SIGNALS} signals "
-          f"(of 4 evaluated; S/R signal arrives in Stage 2)")
+          f"{len(qualifying)} with >= {C.MIN_SIGNALS} of 5 signals")
     print("=" * 96)
-    print("  Legend: PASS = signal passed,  fail = failed,   - = not yet evaluated (Stage 2)")
+    print("  Legend: PASS = signal passed,  fail = failed")
     print()
 
 
