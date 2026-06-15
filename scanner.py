@@ -16,8 +16,11 @@ from __future__ import annotations
 import math
 import sys
 import warnings
-from datetime import datetime
+from concurrent.futures import ThreadPoolExecutor
+from datetime import datetime, time as dtime
 from zoneinfo import ZoneInfo
+
+ET = ZoneInfo("America/New_York")
 
 # Ensure UTF-8 / clean output on Windows consoles
 try:
@@ -246,6 +249,9 @@ def evaluate(sym: str, df: pd.DataFrame, mkt: str) -> dict | None:
         "sig_mkt": sig_mkt,
         "passed_eval": passed,  # out of 5 signals
         "setup": build_setup(df, direction, sr_level),  # entry/stop/targets/ATR/S-R
+        "prev_close": round(float(_prior_session(df)["Close"]), 2),
+        "avg_vol": float(df["Volume"].iloc[-C.VOL_AVG_PERIOD:].mean()),
+        "pm": None,  # filled by enrich_premarket()
     }
 
 
@@ -293,6 +299,101 @@ def print_table(rows: list[dict], mkt: str) -> None:
 
 
 # ---------------------------------------------------------------------------
+# Premarket context (gap %, premarket volume, float, market cap)
+# ---------------------------------------------------------------------------
+def _premarket_stats(intr, sym):
+    """(pm_volume, pm_price) from today's 04:00-09:30 ET 1-minute bars."""
+    try:
+        sub = intr[sym] if isinstance(intr.columns, pd.MultiIndex) else intr
+    except Exception:
+        return None, None
+    if sub is None or sub.empty:
+        return None, None
+    sub = sub.dropna(how="all")
+    try:
+        et = sub.index.tz_convert(ET)
+    except Exception:
+        try:
+            et = sub.index.tz_localize("UTC").tz_convert(ET)
+        except Exception:
+            return None, None
+    mask = [(dtime(4, 0) <= t.time() < dtime(9, 30)) for t in et]
+    pm = sub[pd.Series(mask, index=sub.index)]
+    if not pm.empty:
+        closes = pm["Close"].dropna()
+        return float(pm["Volume"].fillna(0).sum()), (float(closes.iloc[-1]) if len(closes) else None)
+    closes = sub["Close"].dropna()           # weekend/holiday: no premarket bars
+    return None, (float(closes.iloc[-1]) if len(closes) else None)
+
+
+def _fetch_info(sym):
+    try:
+        info = yf.Ticker(sym).get_info() or {}
+        return sym, info.get("floatShares"), info.get("marketCap")
+    except Exception:
+        return sym, None, None
+
+
+def _cap_category(mc):
+    if not mc:
+        return None
+    if mc < 300e6:
+        return "Micro"
+    if mc < 2e9:
+        return "Small"
+    if mc < 10e9:
+        return "Mid"
+    return "Large"
+
+
+def enrich_premarket(rows: list[dict]) -> None:
+    """Attach a `pm` dict to each row: gap %, premarket volume, float, cap. In-place."""
+    if not rows:
+        return
+    syms = [r["ticker"] for r in rows]
+
+    try:
+        intr = yf.download(syms, period="1d", interval="1m", prepost=True,
+                           group_by="ticker", threads=True, progress=False)
+    except Exception:
+        intr = None
+
+    # float / market cap only for qualifiers (.info is slow); threaded.
+    qual = [r["ticker"] for r in rows if r["passed_eval"] >= C.MIN_SIGNALS]
+    info_map = {}
+    if qual:
+        try:
+            with ThreadPoolExecutor(max_workers=8) as ex:
+                for sym, fl, mc in ex.map(_fetch_info, qual):
+                    info_map[sym] = (fl, mc)
+        except Exception:
+            pass
+
+    for r in rows:
+        pm_vol, pm_price = (None, None)
+        if intr is not None:
+            pm_vol, pm_price = _premarket_stats(intr, r["ticker"])
+        prev_close, avg_vol = r.get("prev_close"), r.get("avg_vol")
+        gap_pct = ((pm_price - prev_close) / prev_close * 100) if (pm_price and prev_close) else None
+        pm_vol_pct = (pm_vol / avg_vol * 100) if (pm_vol and avg_vol) else None
+        fl, mc = info_map.get(r["ticker"], (None, None))
+        r["pm"] = {
+            "gap_pct": round(gap_pct, 2) if gap_pct is not None else None,
+            "pm_price": round(pm_price, 2) if pm_price else None,
+            "prev_close": round(prev_close, 2) if prev_close else None,
+            "pm_vol": int(pm_vol) if pm_vol else None,
+            "pm_vol_pct": round(pm_vol_pct, 1) if pm_vol_pct is not None else None,
+            "strong_gap": bool(gap_pct is not None and abs(gap_pct) >= C.GAP_STRONG_THRESHOLD * 100),
+            "weak_gap": bool(gap_pct is not None and abs(gap_pct) <= 1.0),
+            "high_pm_vol": bool(pm_vol_pct is not None and pm_vol_pct >= C.PREMARKET_VOL_THRESHOLD * 100),
+            "float": int(fl) if fl else None,
+            "low_float": bool(fl is not None and fl < C.LOW_FLOAT_THRESHOLD),
+            "market_cap": int(mc) if mc else None,
+            "cap_cat": _cap_category(mc),
+        }
+
+
+# ---------------------------------------------------------------------------
 def run_scan() -> dict:
     """
     Run a full scan and return structured results (shared by CLI + web API).
@@ -311,7 +412,14 @@ def run_scan() -> dict:
         res = evaluate(sym, data.get(sym), mkt)
         if res:
             rows.append(res)
-    rows.sort(key=lambda r: (-r["passed_eval"], r["ticker"]))
+
+    enrich_premarket(rows)
+
+    # Sort: most signals first, then biggest gap (nulls last) — per spec priority.
+    def _key(r):
+        g = r["pm"]["gap_pct"] if r.get("pm") and r["pm"]["gap_pct"] is not None else None
+        return (-r["passed_eval"], -(abs(g) if g is not None else -1))
+    rows.sort(key=_key)
 
     return {"market": mkt, "rows": rows, "error": None}
 

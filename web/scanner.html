@@ -115,12 +115,13 @@
           <tr>
             <th></th>
             <th class="num">Eval</th><th>Ticker</th><th>Dir</th><th class="num">Price</th>
+            <th class="num">Gap</th>
             <th>S/R</th><th>EMA</th><th>RSI</th><th>Vol</th><th>Mkt</th>
             <th class="num">RSI val</th><th class="num">Vol ×</th><th class="num">EMA gap</th>
           </tr>
         </thead>
         <tbody id="tbody">
-          <tr><td colspan="13" class="muted" style="padding:26px;text-align:center;">Loading cached scan…</td></tr>
+          <tr><td colspan="14" class="muted" style="padding:26px;text-align:center;">Loading cached scan…</td></tr>
         </tbody>
       </table>
     </div>
@@ -227,6 +228,53 @@ function toggleRow(t){
   if (tg) tg.textContent = expanded.has(t) ? "▾" : "▸";
 }
 
+function fmtShares(n){
+  if (n == null) return "—";
+  if (n >= 1e9) return (n / 1e9).toFixed(1) + "B";
+  if (n >= 1e6) return (n / 1e6).toFixed(0) + "M";
+  if (n >= 1e3) return (n / 1e3).toFixed(0) + "K";
+  return String(n);
+}
+function fmtCap(pm){
+  if (!pm || pm.market_cap == null) return pm && pm.cap_cat ? pm.cap_cat : "—";
+  const mc = pm.market_cap;
+  const v = mc >= 1e9 ? "$" + (mc / 1e9).toFixed(1) + "B" : "$" + (mc / 1e6).toFixed(0) + "M";
+  return `${pm.cap_cat || ""} (${v})`.trim();
+}
+function gapCell(r){
+  const g = r.pm && r.pm.gap_pct;
+  if (g == null) return '<span class="muted">—</span>';
+  const cls = g >= 0 ? "pnl-pos" : "pnl-neg";
+  const flame = r.pm.strong_gap ? " 🔥" : "";
+  return `<span class="${cls}">${g > 0 ? "+" : ""}${g.toFixed(1)}%${flame}</span>`;
+}
+function premarketSection(r){
+  const pm = r.pm;
+  if (!pm) return "";
+  const gap = pm.gap_pct == null ? "—" : `${pm.gap_pct > 0 ? "+" : ""}${pm.gap_pct.toFixed(2)}%`;
+  const rvol = (r.vratio != null) ? `${Number(r.vratio).toFixed(2)}×` : "—";
+  const flags = [];
+  if (pm.strong_gap) flags.push('<span class="pm-flag gap">🔥 Strong gap</span>');
+  if (pm.weak_gap)   flags.push('<span class="pm-flag weak">Weak / no gap</span>');
+  if (r.vratio >= 2) flags.push('<span class="pm-flag vol">📊 RVOL ≥ 2×</span>');
+  if (pm.high_pm_vol) flags.push('<span class="pm-flag vol">📊 High PM vol</span>');
+  if (pm.low_float)  flags.push('<span class="pm-flag float">🪙 Low float</span>');
+  const pmVol = pm.pm_vol != null ? `<span><b>PM vol</b> ${fmtShares(pm.pm_vol)}${pm.pm_vol_pct != null ? ` (${pm.pm_vol_pct}% avg)` : ""}</span>` : "";
+  return `
+    <div class="pm-section">
+      <div class="pm-title">Premarket context</div>
+      <div class="pm-grid">
+        <span><b>Gap</b> ${gap}</span>
+        <span><b>Prev close</b> ${pm.prev_close != null ? money(pm.prev_close) : "—"}</span>
+        <span><b>Rel vol</b> ${rvol}</span>
+        ${pmVol}
+        <span><b>Float</b> ${fmtShares(pm.float)}</span>
+        <span><b>Mkt cap</b> ${fmtCap(pm)}</span>
+      </div>
+      ${flags.length ? `<div class="pm-flags">${flags.join("")}</div>` : ""}
+    </div>`;
+}
+
 function tradeCard(r){
   const s = r.setup;
   if (!s) return '<div class="muted" style="padding:12px 16px;">No trade setup (insufficient data).</div>';
@@ -257,7 +305,8 @@ function tradeCard(r){
     ${s.abnormal ? '<div class="tc-warn">⚠ Stop distance is outside 0.5–1.5× ATR — unusually tight or wide. Review manually before sizing.</div>' : ""}
     <div class="tc-note">Enter on the ${long ? "break above" : "break below"} ${money(trigger)} (prior-session ${long ? "high" : "low"}), stop ${money(s.stop)}${s.stop_basis === "S/R" ? " (at the S/R level)" : ""}.
       Scale 50% at ${money(s.t1)} (1R) → move stop to breakeven → trail the rest toward ${money(s.t2)} (2R).
-      Sizing on a ${money(acct)} account at 1% risk. Stop is 0.75× ATR (switches to S/R-based in the next stage).</div>
+      Sizing on a ${money(acct)} account at 1% risk.</div>
+    ${premarketSection(r)}
   </div>`;
 }
 
@@ -276,7 +325,7 @@ function render(){
 
   const tbody = document.getElementById("tbody");
   if (!rows.length){
-    tbody.innerHTML = '<tr><td colspan="13" class="muted" style="padding:26px;text-align:center;">No tickers match the current filters.</td></tr>';
+    tbody.innerHTML = '<tr><td colspan="14" class="muted" style="padding:26px;text-align:center;">No tickers match the current filters.</td></tr>';
     return;
   }
   tbody.innerHTML = rows.map(r => {
@@ -291,12 +340,13 @@ function render(){
       <td class="tick">${r.ticker}</td>
       <td><span class="tag ${r.direction.toLowerCase()}">${r.direction}</span></td>
       <td class="num">$${fmt(r.price)}</td>
+      <td class="num">${gapCell(r)}</td>
       <td>${sig(r.sig_sr)}</td><td>${sig(r.sig_ema)}</td><td>${sig(r.sig_rsi)}</td>
       <td>${sig(r.sig_vol)}</td><td>${sig(r.sig_mkt)}</td>
       <td class="num">${fmt(r.rsi,1)}</td><td class="num">${fmt(r.vratio)}</td><td class="num">${fmt(r.ema_gap)}</td>
     </tr>`;
     const detail = r.setup
-      ? `<tr class="detailrow" id="d_${r.ticker}" style="display:${open ? "" : "none"}"><td colspan="13">${tradeCard(r)}</td></tr>`
+      ? `<tr class="detailrow" id="d_${r.ticker}" style="display:${open ? "" : "none"}"><td colspan="14">${tradeCard(r)}</td></tr>`
       : "";
     return rowHtml + detail;
   }).join("");
@@ -310,7 +360,7 @@ acctEl.addEventListener("change", () => setAccount(acctEl.value));
 const hadCache = await loadCache();
 if (!hadCache){
   document.getElementById("tbody").innerHTML =
-    '<tr><td colspan="13" class="muted" style="padding:26px;text-align:center;">No cached scan yet — click <b>Refresh</b> to run one.</td></tr>';
+    '<tr><td colspan="14" class="muted" style="padding:26px;text-align:center;">No cached scan yet — click <b>Refresh</b> to run one.</td></tr>';
 }
 </script>
 </body>

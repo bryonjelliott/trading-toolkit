@@ -141,6 +141,16 @@ details.playbook>summary:hover{color:var(--accent);}
 .tc-note{margin-top:11px;font-size:12px;color:var(--muted);line-height:1.6;}
 .tc-warn{margin-top:11px;background:rgba(255,207,86,.08);border:1px solid rgba(255,207,86,.3);
   border-radius:8px;padding:8px 11px;color:var(--yellow);font-size:12px;}
+.pm-section{margin-top:13px;padding-top:12px;border-top:1px dashed var(--border);}
+.pm-title{font-size:11px;text-transform:uppercase;letter-spacing:.6px;color:var(--accent);margin-bottom:8px;}
+.pm-grid{display:flex;flex-wrap:wrap;gap:8px 18px;font-size:12.5px;}
+.pm-grid b{color:var(--muted);font-weight:600;margin-right:4px;text-transform:uppercase;font-size:10.5px;letter-spacing:.4px;}
+.pm-flags{display:flex;flex-wrap:wrap;gap:6px;margin-top:10px;}
+.pm-flag{font-size:11px;font-weight:700;padding:2px 9px;border-radius:20px;background:var(--chip);}
+.pm-flag.gap{background:rgba(33,208,122,.18);color:var(--green);}
+.pm-flag.vol{background:rgba(62,166,255,.16);color:var(--accent);}
+.pm-flag.float{background:rgba(255,207,86,.16);color:var(--yellow);}
+.pm-flag.weak{background:var(--chip);color:var(--muted);}
 .tradecard .stat .sub{color:var(--muted);font-size:10.5px;margin-top:3px;}
 .toggle-btn{background:transparent;border:none;color:var(--accent);cursor:pointer;font-size:13px;
   padding:2px 6px;font-weight:800;}
