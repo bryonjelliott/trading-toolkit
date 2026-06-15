@@ -215,7 +215,7 @@ export async function runScan(budgetMs = 22000, limitN = 0) {
     market: mkt, error: null, rows,
     total: rows.length, qualifying, min_signals: CFG.MIN_SIGNALS,
     fetched: Object.keys(bars).length, watchlist: list.length,
-    generated_at: new Date().toISOString(),
+    build: "v4", generated_at: new Date().toISOString(),
   };
 }
 
