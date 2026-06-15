@@ -53,6 +53,58 @@
     </div>
   </div>
 
+  <details class="playbook">
+    <summary>📘 Strategy Playbook — what it is, how it works, what to look for <span class="chev">›</span></summary>
+    <div class="pb-body">
+
+      <h4>What this strategy is</h4>
+      <p>A <b>confluence</b> day-trading approach: each morning it scans ~70 liquid Nasdaq stocks and flags only those where <b>at least 3 of 5 independent signals agree</b>. Stacking confirmations filters out weak, low-probability trades — you trade only where trend, momentum, volume and the broad market all line up.</p>
+
+      <h4>The 5 confluence signals</h4>
+      <ul>
+        <li><span class="signum">1</span><b>Price near support / resistance</b> — within 1.5% of a key level price has reversed at twice before. Long near support, short near resistance. <span class="muted">(Stage 2 — shows "–" for now.)</span></li>
+        <li><span class="signum">2</span><b>EMA 9/21 alignment</b> — EMA9 above EMA21 = uptrend (long bias); below = downtrend (short bias). A wider gap means a stronger trend.</li>
+        <li><span class="signum">3</span><b>RSI 14 filter</b> — passes between 28 and 74. Skips overbought (≥75, chasing) and oversold (≤27, catching a falling knife).</li>
+        <li><span class="signum">4</span><b>Volume confirmation</b> — yesterday's volume ≥ 1.1× its 20-day average. Confirms real participation behind the move.</li>
+        <li><span class="signum">5</span><b>SPY / QQQ alignment</b> — both index trends must agree with your direction. Trade <i>with</i> the market, not against it.</li>
+      </ul>
+
+      <h4>Which direction to trade</h4>
+      <ul>
+        <li><b>Long</b> when EMAs trend up and price sits near support.</li>
+        <li><b>Short</b> when EMAs trend down and price sits near resistance.</li>
+        <li>If signals conflict, default to the <b>SPY/QQQ market direction</b> shown in the badge above.</li>
+      </ul>
+
+      <h4>The trade plan (Stage 2 builds this per stock)</h4>
+      <div class="pb-grid">
+        <div class="pb-card"><div class="t">Entry</div>Long: prior-day high + $0.05 (breakout). Short: prior-day low − $0.05 (breakdown).</div>
+        <div class="pb-card"><div class="t">Stop loss</div>Nearest S/R beyond entry, or 0.75× ATR — whichever is tighter. Keep stop distance 0.5–1.5× ATR.</div>
+        <div class="pb-card"><div class="t">Target 1 — 1R</div>Entry ± (entry − stop). <b>Scale out 50%</b> here.</div>
+        <div class="pb-card"><div class="t">Target 2 — 2R</div>Entry ± 2×(entry − stop). <b>Exit the rest</b> here.</div>
+        <div class="pb-card"><div class="t">Position size</div>Risk = 1% of account. Shares = risk ÷ stop distance (round down). Never size past 1%.</div>
+      </div>
+
+      <h4>What to look for (quality &amp; conviction)</h4>
+      <ul>
+        <li><b>Higher signal count = higher conviction</b> — a 5/5 or 4/4 beats a borderline 3.</li>
+        <li><b>Strong gap on a catalyst</b> (≥4%) plus <b>high relative volume</b> (RVOL ≥ 2×) means the stock is "in play."</li>
+        <li><b>Healthy ATR</b> so the stop has room; <b>lower-float</b> names move faster and cleaner.</li>
+        <li><b>Market not fighting you</b> — glance at the SPY/QQQ trend badge before committing.</li>
+      </ul>
+
+      <h4>Execution discipline</h4>
+      <ul>
+        <li>Wait for the entry trigger (the actual breakout/breakdown) — don't anticipate it.</li>
+        <li>Honor the stop. <b>Never widen it</b>, and never add to a loser.</li>
+        <li>Scale out at 1R, move the stop to breakeven, let the runner work toward 2R.</li>
+        <li>Risk a max of <b>1% per trade</b>. A few A-setups beat many marginal ones.</li>
+      </ul>
+
+      <div class="pb-note">Educational reference only, not financial advice. This scanner currently evaluates signals 2–5 (scored x/4); the S/R signal and the full entry/stop/target trade cards arrive in Stage 2.</div>
+    </div>
+  </details>
+
   <div class="card">
     <div class="tablewrap">
       <table>
