@@ -1,0 +1,176 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Trade Calculator</title>
+<link rel="stylesheet" href="/assets/style.css">
+</head>
+<body>
+<div class="topbar">
+  <div class="brand"><span>Trading Toolkit</span><small>Trade Calculator</small></div>
+  <div class="nav">
+    <a href="/">Home</a>
+    <a href="/scanner.html">Scanner</a>
+    <a href="/journal.html">Journal</a>
+    <a href="/calculator.html" class="active">Calculator</a>
+  </div>
+</div>
+
+<div class="wrap">
+  <div class="card">
+    <h2>Position Size &amp; Risk/Reward Calculator</h2>
+    <p class="sub">Enter your account, risk, entry and stop. Get the share count that risks exactly your chosen amount, plus the 1R / 2R / 3R sell prices. Add a target to see its reward-to-risk. Works for any trade.</p>
+
+    <div class="formgrid">
+      <div class="field"><label>Direction</label>
+        <select id="dir" onchange="compute()">
+          <option value="long">Long</option>
+          <option value="short">Short</option>
+        </select>
+      </div>
+      <div class="field"><label>Account size $</label><input id="acct" type="number" step="100" inputmode="decimal" oninput="compute()"></div>
+      <div class="field"><label>Risk per trade %</label><input id="riskPct" type="number" step="0.1" inputmode="decimal" oninput="compute()"></div>
+      <div class="field"><label>Entry price $</label><input id="entry" type="number" step="0.01" inputmode="decimal" oninput="compute()"></div>
+      <div class="field"><label>Stop price $</label><input id="stop" type="number" step="0.01" inputmode="decimal" oninput="compute()"></div>
+      <div class="field"><label>Target price $ <span class="muted">(optional)</span></label><input id="target" type="number" step="0.01" inputmode="decimal" oninput="compute()"></div>
+    </div>
+    <div id="msg" style="margin-top:12px;"></div>
+  </div>
+
+  <div class="card" id="resultCard" style="display:none;">
+    <div id="rr"></div>
+    <div class="stats" id="stats"></div>
+
+    <h3 style="margin:18px 0 8px;font-size:14px;color:var(--accent);">Sell levels</h3>
+    <div class="tablewrap">
+      <table>
+        <thead>
+          <tr><th>Level</th><th class="num">Sell price</th><th class="num">P&amp;L $</th><th class="num">Return %</th><th class="num">R</th></tr>
+        </thead>
+        <tbody id="ladder"></tbody>
+      </table>
+    </div>
+    <p class="legend" style="margin-top:12px;">
+      <b>R</b> = your risk per share (entry → stop). 1R means a move equal to your risk; a 2R target is twice your risk.
+      Sell price for each level is where price hits that multiple. P&amp;L assumes the full position.
+    </p>
+  </div>
+
+  <div class="card">
+    <h3 style="margin-top:0;font-size:14px;color:var(--accent);">How to use it</h3>
+    <ul class="legend" style="line-height:1.7;">
+      <li><b>Shares</b> is sized so that if price hits your stop, you lose your chosen risk % — no more.</li>
+      <li><b>1R / 2R / 3R</b> are common profit targets. A popular plan: take half off at 1R, move your stop to breakeven, let the rest run toward 2R–3R.</li>
+      <li>Aim for trades where a realistic <b>target is ≥ 2R</b> (reward:risk ≥ 2:1) so winners outweigh losers over time.</li>
+      <li>Account size and risk % are saved in your browser for next time.</li>
+    </ul>
+  </div>
+</div>
+
+<footer>Educational tool, not financial advice. Trading involves substantial risk of loss.</footer>
+
+<script>
+const $ = (id) => document.getElementById(id);
+const num = (id) => { const v = parseFloat($(id).value); return isNaN(v) ? null : v; };
+const money = (v) => (v < 0 ? "-$" : "$") + Math.abs(v).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+const pct = (v) => (v >= 0 ? "+" : "") + v.toFixed(2) + "%";
+
+// restore saved prefs
+$("acct").value = localStorage.getItem("acctSize") || "10000";
+$("riskPct").value = localStorage.getItem("riskPct") || "1";
+
+function compute(){
+  const dir = $("dir").value, long = dir === "long";
+  const acct = num("acct"), riskPct = num("riskPct"), entry = num("entry"), stop = num("stop"), target = num("target");
+
+  if (acct != null) localStorage.setItem("acctSize", acct);
+  if (riskPct != null) localStorage.setItem("riskPct", riskPct);
+
+  const msg = $("msg");
+  const result = $("resultCard");
+
+  if (entry == null || stop == null || acct == null || riskPct == null){
+    result.style.display = "none";
+    msg.innerHTML = '<div class="muted">Enter account, risk %, entry and stop to calculate.</div>';
+    return;
+  }
+  const stopValid = long ? stop < entry : stop > entry;
+  if (!stopValid){
+    result.style.display = "none";
+    msg.innerHTML = `<div class="warn">For a ${long ? "long, your stop must be <b>below</b>" : "short, your stop must be <b>above</b>"} the entry price.</div>`;
+    return;
+  }
+  msg.innerHTML = "";
+  result.style.display = "";
+
+  const riskPerShare = Math.abs(entry - stop);
+  const dollarRisk = acct * riskPct / 100;
+  const shares = riskPerShare > 0 ? Math.floor(dollarRisk / riskPerShare) : 0;
+  const actualRisk = shares * riskPerShare;
+  const cost = shares * entry;
+  const pctAcct = acct ? cost / acct * 100 : 0;
+
+  const priceAtR = (R) => long ? entry + R * riskPerShare : entry - R * riskPerShare;
+
+  // stat cards
+  const cell = (k, v, cls = "") => `<div class="stat"><div class="k">${k}</div><div class="v ${cls}">${v}</div></div>`;
+  $("stats").innerHTML =
+    cell("Shares", shares.toLocaleString(), "blue") +
+    cell("$ at risk", money(actualRisk), "red") +
+    cell("Risk / share", money(riskPerShare), "yellow") +
+    cell("Position cost", money(cost)) +
+    cell("% of account", pctAcct.toFixed(1) + "%");
+
+  // ladder
+  const rows = [];
+  rows.push({ name: "Stop", price: stop, pnl: -actualRisk, r: -1, stop: true });
+  [1, 2, 3].forEach(R => rows.push({ name: R + "R", price: priceAtR(R), pnl: R * actualRisk, r: R }));
+  if (target != null){
+    const rewardPerShare = long ? target - entry : entry - target;
+    rows.push({ name: "🎯 Target", price: target, pnl: shares * rewardPerShare, r: rewardPerShare / riskPerShare, isTarget: true });
+  }
+  $("ladder").innerHTML = rows.map(row => {
+    const ret = cost ? row.pnl / cost * 100 : 0;
+    const pnlCls = row.pnl >= 0 ? "pnl-pos" : "pnl-neg";
+    const hl = row.isTarget ? ' style="background:rgba(62,166,255,.07);"' : (row.stop ? ' style="background:rgba(255,84,112,.06);"' : "");
+    return `<tr${hl}>
+      <td><b>${row.name}</b></td>
+      <td class="num">${money(row.price)}</td>
+      <td class="num ${pnlCls}">${money(row.pnl)}</td>
+      <td class="num ${pnlCls}">${pct(ret)}</td>
+      <td class="num">${row.r.toFixed(2)}R</td>
+    </tr>`;
+  }).join("");
+
+  // reward:risk headline
+  const rr = $("rr");
+  if (target != null){
+    const rewardPerShare = long ? target - entry : entry - target;
+    const ratio = rewardPerShare / riskPerShare;
+    const good = ratio >= 2, ok = ratio >= 1;
+    const color = good ? "var(--green)" : ok ? "var(--yellow)" : "var(--red)";
+    const verdict = ratio < 0 ? "Target is on the wrong side of entry" : good ? "Solid — winners outweigh losers" : ok ? "Marginal — aim for ≥ 2:1" : "Poor reward for the risk";
+    rr.innerHTML = `<div class="rr-box" style="border-color:${color};">
+        <div class="rr-num" style="color:${color};">${ratio < 0 ? "—" : ratio.toFixed(2) + " : 1"}</div>
+        <div><div style="font-weight:700;">Reward : Risk</div><div class="muted" style="font-size:12px;">${verdict}</div></div>
+        <div style="margin-left:auto;text-align:right;">
+          <div class="muted" style="font-size:11px;">REWARD vs RISK</div>
+          <div style="font-weight:700;"><span class="pnl-pos">${money(shares * rewardPerShare)}</span> <span class="muted">vs</span> <span class="pnl-neg">${money(actualRisk)}</span></div>
+        </div>
+      </div>`;
+  } else {
+    rr.innerHTML = `<div class="muted" style="margin-bottom:14px;">Add a <b>target price</b> above to see reward-to-risk for your exit.</div>`;
+  }
+}
+
+compute();
+</script>
+
+<style>
+.rr-box{display:flex;align-items:center;gap:16px;background:var(--panel2);border:1px solid var(--border);
+  border-radius:12px;padding:16px 18px;margin-bottom:16px;flex-wrap:wrap;}
+.rr-num{font-size:30px;font-weight:800;line-height:1;}
+</style>
+</body>
+</html>
