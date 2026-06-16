@@ -158,27 +158,67 @@ function banner(){
      it calls the serverless function directly.</div>`;
 }
 
+let lastCacheTime = null;
+
 async function loadCache(){
   if (!sb) return false;
   const { data, error } = await sb.from("scan_cache").select("payload, updated_at").eq("id", 1).maybeSingle();
   if (error || !data || !data.payload) return false;
   DATA = data.payload;
+  lastCacheTime = data.updated_at;
   setUpdated(data.updated_at);
   setMarket(DATA.market);
   render();
   return true;
 }
 
+async function fetchCacheTime(){
+  if (!sb) return null;
+  const { data } = await sb.from("scan_cache").select("updated_at").eq("id", 1).maybeSingle();
+  return data ? data.updated_at : null;
+}
+
+// Refresh = trigger a real scan on GitHub, then poll Supabase until the cache
+// updates. Falls back to just re-reading the cache if the trigger isn't available.
 async function refreshLive(){
-  // The scan itself is run by the scheduled GitHub Action (Yahoo blocks
-  // Netlify). "Refresh" just re-pulls the latest cached result from Supabase.
   const btn = document.getElementById("refreshBtn");
   const status = document.getElementById("status");
   btn.disabled = true;
-  status.innerHTML = '<span class="spinner"></span> Reloading…';
-  const ok = await loadCache();
-  if (!ok) status.textContent = "No cached scan available yet — the scheduled job may not have run.";
-  btn.disabled = false;
+  status.innerHTML = '<span class="spinner"></span> Starting live scan…';
+  const before = lastCacheTime;
+
+  let triggered = false;
+  try {
+    const res = await fetch("/api/trigger-scan", { method: "POST" });
+    const j = await res.json().catch(() => ({}));
+    triggered = res.ok && j.ok;
+    if (!triggered) throw new Error(j.error || `trigger failed (${res.status})`);
+  } catch (e) {
+    await loadCache();
+    status.textContent = "Couldn't start a live scan — showing latest cached data.";
+    btn.disabled = false;
+    return;
+  }
+
+  status.innerHTML = '<span class="spinner"></span> Scanning live data… (~1–2 min)';
+  const start = Date.now();
+  const TIMEOUT = 210000; // 3.5 min
+
+  const poll = async () => {
+    const t = await fetchCacheTime();
+    if (t && t !== before){
+      await loadCache();              // fresh data — render + timestamp
+      btn.disabled = false;
+      return;
+    }
+    if (Date.now() - start > TIMEOUT){
+      status.textContent = "Scan is taking longer than usual — it'll appear automatically when done.";
+      btn.disabled = false;
+      return;
+    }
+    setTimeout(poll, 6000);
+  };
+  setTimeout(poll, 9000);            // give the workflow a moment to start
 }
 
 function setUpdated(iso){

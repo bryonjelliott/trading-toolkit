@@ -24,3 +24,9 @@
   from = "/api/scan"
   to = "/.netlify/functions/scan"
   status = 200
+
+# /api/trigger-scan -> fire the GitHub scan workflow on demand
+[[redirects]]
+  from = "/api/trigger-scan"
+  to = "/.netlify/functions/trigger-scan"
+  status = 200
