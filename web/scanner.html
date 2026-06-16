@@ -275,6 +275,27 @@ function premarketSection(r){
     </div>`;
 }
 
+function timeAgo(unixSec){
+  if (!unixSec) return "";
+  const mins = Math.floor((Date.now() / 1000 - unixSec) / 60);
+  if (mins < 60) return mins <= 1 ? "just now" : `${mins}m ago`;
+  const hrs = Math.floor(mins / 60);
+  if (hrs < 24) return `${hrs}h ago`;
+  return `${Math.floor(hrs / 24)}d ago`;
+}
+function esc(s){ return (s || "").replace(/[&<>"]/g, c => ({ "&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;" }[c])); }
+function newsSection(r){
+  if (!r.news || !r.news.length) return "";
+  const items = r.news.map(n => `
+    <li><a href="${esc(n.url)}" target="_blank" rel="noopener">${esc(n.headline)}</a>
+      <span class="news-meta">— ${esc(n.source) || "news"}${n.datetime ? " · " + timeAgo(n.datetime) : ""}</span></li>`).join("");
+  return `
+    <div class="news-section">
+      <div class="pm-title">📰 Catalysts — recent news</div>
+      <ul class="news-list">${items}</ul>
+    </div>`;
+}
+
 function tradeCard(r){
   const s = r.setup;
   if (!s) return '<div class="muted" style="padding:12px 16px;">No trade setup (insufficient data).</div>';
@@ -307,6 +328,7 @@ function tradeCard(r){
       Scale 50% at ${money(s.t1)} (1R) → move stop to breakeven → trail the rest toward ${money(s.t2)} (2R).
       Sizing on a ${money(acct)} account at 1% risk.</div>
     ${premarketSection(r)}
+    ${newsSection(r)}
   </div>`;
 }
 
@@ -337,7 +359,7 @@ function render(){
     const rowHtml = `<tr${below}>
       ${toggle}
       <td class="num"><span class="score ${scoreClass(r.passed_eval)}">${r.passed_eval}/5</span></td>
-      <td class="tick">${r.ticker}</td>
+      <td class="tick">${r.ticker}${r.news && r.news.length ? `<span class="news-badge" title="${r.news.length} recent headline(s)">📰</span>` : ""}</td>
       <td><span class="tag ${r.direction.toLowerCase()}">${r.direction}</span></td>
       <td class="num">$${fmt(r.price)}</td>
       <td class="num">${gapCell(r)}</td>

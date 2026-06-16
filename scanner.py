@@ -14,13 +14,17 @@ Run:  py -3.11 scanner.py
 """
 from __future__ import annotations
 import math
+import os
 import sys
 import warnings
 from concurrent.futures import ThreadPoolExecutor
-from datetime import datetime, time as dtime
+from datetime import datetime, time as dtime, timedelta
 from zoneinfo import ZoneInfo
 
+import requests
+
 ET = ZoneInfo("America/New_York")
+FINNHUB_KEY = os.environ.get("FINNHUB_API_KEY")
 
 # Ensure UTF-8 / clean output on Windows consoles
 try:
@@ -394,6 +398,60 @@ def enrich_premarket(rows: list[dict]) -> None:
 
 
 # ---------------------------------------------------------------------------
+# Catalysts / news (Finnhub company-news)
+# ---------------------------------------------------------------------------
+def _fetch_news(sym, days=7, limit=3):
+    """Most-recent company-news headlines from Finnhub (empty if no key/error)."""
+    if not FINNHUB_KEY:
+        return sym, []
+    to = datetime.now(ET).date()
+    frm = to - timedelta(days=days)
+    url = ("https://finnhub.io/api/v1/company-news"
+           f"?symbol={sym}&from={frm}&to={to}&token={FINNHUB_KEY}")
+    try:
+        r = requests.get(url, timeout=10)
+        if r.status_code != 200:
+            return sym, []
+        items = r.json() or []
+        items.sort(key=lambda x: x.get("datetime", 0), reverse=True)
+        out = []
+        for it in items[:limit]:
+            head = (it.get("headline") or "").strip()
+            if not head:
+                continue
+            out.append({
+                "headline": head,
+                "source": it.get("source"),
+                "url": it.get("url"),
+                "datetime": it.get("datetime"),
+                "summary": (it.get("summary") or "").strip()[:240],
+            })
+        return sym, out
+    except Exception:
+        return sym, []
+
+
+def enrich_news(rows: list[dict]) -> None:
+    """Attach `news` (list of recent headlines) to each qualifying row. In-place."""
+    for r in rows:
+        r["news"] = []
+    if not FINNHUB_KEY:
+        return
+    qual = [r for r in rows if r["passed_eval"] >= C.MIN_SIGNALS]
+    if not qual:
+        return
+    by_sym = {}
+    try:
+        with ThreadPoolExecutor(max_workers=5) as ex:
+            for sym, news in ex.map(lambda r: _fetch_news(r["ticker"]), qual):
+                by_sym[sym] = news
+    except Exception:
+        pass
+    for r in qual:
+        r["news"] = by_sym.get(r["ticker"], [])
+
+
+# ---------------------------------------------------------------------------
 def run_scan() -> dict:
     """
     Run a full scan and return structured results (shared by CLI + web API).
@@ -414,6 +472,7 @@ def run_scan() -> dict:
             rows.append(res)
 
     enrich_premarket(rows)
+    enrich_news(rows)
 
     # Sort: most signals first, then biggest gap (nulls last) — per spec priority.
     def _key(r):
