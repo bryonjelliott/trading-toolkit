@@ -6,8 +6,10 @@ name: Confluence scan -> Supabase
 
 on:
   schedule:
-    # Every 30 minutes, ~premarket through the close, on weekdays (UTC).
-    - cron: "*/30 10-21 * * 1-5"
+    # Every ~15 min on weekdays, ~04:00-18:00 ET (08:00-22:00 UTC).
+    # NOTE: offset minutes (not :00/:30) — GitHub drops schedules at the top/half
+    # of the hour under load, which is why the old "*/30" never fired reliably.
+    - cron: "4,19,34,49 8-22 * * 1-5"
   workflow_dispatch: {}   # lets you run it manually from the Actions tab
 
 jobs:
